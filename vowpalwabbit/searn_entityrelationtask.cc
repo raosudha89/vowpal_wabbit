@@ -18,6 +18,7 @@ namespace EntityRelationTask     {  Searn::searn_task task = { "entity_relation"
 namespace EntityRelationTask {
   using namespace Searn;
 
+  void update_example_indicies(bool audit, example* ec, uint32_t mult_amount, uint32_t plus_amount);
   //enum SearchOrder { EntityFirst, Mix, Skip };
 
   struct task_data {
@@ -30,6 +31,8 @@ namespace EntityRelationTask {
     v_array<uint32_t> y_allowed_entity;
     v_array<uint32_t> y_allowed_relation;
     int search_order;
+    example* ldf_entity;
+    example* ldf_relation;
     //SearchOrder search_order;
   };
 
@@ -44,7 +47,7 @@ namespace EntityRelationTask {
       ("constraints", "Use Constraints")
       ("relation_none_cost", po::value<float>(&(my_task_data->relation_none_cost))->default_value(0.5), "None Relation Cost")
       ("skip_cost", po::value<float>(&(my_task_data->skip_cost))->default_value(0.01), "Skip Cost (only used when search_order = skip")
-      ("search_order", po::value<int>(&(my_task_data->search_order))->default_value(0), "Search Order 0: EntityFirst 1: Mix 2: Skip" );
+      ("search_order", po::value<int>(&(my_task_data->search_order))->default_value(0), "Search Order 0: EntityFirst 1: Mix 2: Skip 3:EntityFirstLDF" );
     vm = add_options(*srn.all, sspan_opts);
 	  
 	// setup entity and relation labels
@@ -67,15 +70,42 @@ namespace EntityRelationTask {
 	  my_task_data->y_allowed_relation.push_back(i);
 	}
 
+    if(my_task_data->search_order != 3) {
+      srn.set_options(0);
+    } else {
+      example* ldf_examples = alloc_examples(sizeof(COST_SENSITIVE::label), 10);
+      COST_SENSITIVE::wclass default_wclass = { 0., 0, 0., 0. };
+      for (size_t a=0; a<10; a++) {
+	/*COST_SENSITIVE::wclass* default_wclass = new COST_SENSITIVE::wclass();
+	 default_wclass->x = 0.f;
+         default_wclass->class_index = (uint32_t)a+1;
+         default_wclass->partial_prediction = 0.f;
+         default_wclass->wap_value = 0.f;
+        COST_SENSITIVE::label* lab = (COST_SENSITIVE::label*)ldf_examples[a].ld;
+        lab->costs.push_back(*default_wclass);*/
+	COST_SENSITIVE::label* lab = (COST_SENSITIVE::label*)ldf_examples[a].ld;
+	lab->costs.push_back(default_wclass);
+      }
+      my_task_data->ldf_entity = ldf_examples;
+      my_task_data->ldf_relation = ldf_examples+4;
+      srn.set_options(IS_LDF);
+    }
     srn.set_task_data<task_data>(my_task_data);
-    srn.set_options(0);
+
   }
 
   void finish(searn& srn) {
+    cerr << "a";
     task_data * my_task_data = srn.get_task_data<task_data>();
     my_task_data->y_allowed_entity.delete_v();
     my_task_data->y_allowed_relation.delete_v();
+    if(my_task_data->search_order == 3) {
+      for (size_t a=0; a<10; a++)
+        dealloc_example(COST_SENSITIVE::cs_label.delete_label, my_task_data->ldf_entity[a]);
+      free(my_task_data->ldf_entity);
+    }
     delete my_task_data;
+    cerr << "b";
   }    // if we had task data, we'd want to free it here
 
   bool check_constraints(int ent1_id, int ent2_id, int rel_id){
@@ -108,9 +138,30 @@ namespace EntityRelationTask {
       }
   }
   
-  size_t predict_entity(searn&srn, example* ex, v_array<size_t>& predictions){
+  size_t predict_entity(searn&srn, example* ex, v_array<size_t>& predictions, bool isLdf=false){
     task_data* my_task_data = srn.get_task_data<task_data>();
-    size_t prediction = srn.predict(ex, MULTICLASS::get_example_label(ex), &(my_task_data->y_allowed_entity));
+    size_t prediction;
+    if(my_task_data->search_order==2){
+      v_array<uint32_t> star_labels;
+      star_labels.push_back(MULTICLASS::get_example_label(ex));
+      star_labels.push_back(LABEL_SKIP);
+      prediction = srn.predict(ex, &star_labels, &(my_task_data->y_allowed_entity));
+    } else {
+      if(isLdf) {
+	for(size_t a=0; a<4; a++){
+          VW::copy_example_data(false, &my_task_data->ldf_entity[a], ex);
+	  update_example_indicies(true, &my_task_data->ldf_entity[a], quadratic_constant, cubic_constant * (uint32_t)(a+1));
+          COST_SENSITIVE::label* lab = (COST_SENSITIVE::label*)my_task_data->ldf_entity[a].ld;
+          lab->costs[0].x = 0.f;
+          lab->costs[0].class_index = (uint32_t)a+1;
+          lab->costs[0].partial_prediction = 0.f;
+          lab->costs[0].wap_value = 0.f;
+	}
+	prediction  = srn.predictLDF(my_task_data->ldf_entity, 4, MULTICLASS::get_example_label(ex)-1)+1;
+      } else {
+        prediction = srn.predict(ex, MULTICLASS::get_example_label(ex), &(my_task_data->y_allowed_entity));
+      }
+    }
 
     // record loss
     float loss = 0.0;
@@ -121,7 +172,7 @@ namespace EntityRelationTask {
     srn.loss(loss);
     return prediction;
   }
-  size_t predict_relation(searn&srn, example* ex, history_info* hinfo, v_array<size_t>& predictions){
+  size_t predict_relation(searn&srn, example* ex, history_info* hinfo, v_array<size_t>& predictions, bool isLdf=false){
     char type; 
     int id1, id2;
     task_data* my_task_data = srn.get_task_data<task_data>();
@@ -143,10 +194,29 @@ namespace EntityRelationTask {
     // add history feature to relation example
     if(my_task_data->history_features && hist[0]!= 0) {
       add_history_to_example(*(srn.all), *hinfo , ex, hist, 0);
-    }	
-
-    size_t prediction = srn.predict(ex, MULTICLASS::get_example_label(ex),&constrained_relation_labels);
-
+    }
+    size_t prediction;
+    if(my_task_data->search_order==2){
+      v_array<uint32_t> star_labels;
+      star_labels.push_back(MULTICLASS::get_example_label(ex));
+      star_labels.push_back(LABEL_SKIP);
+      prediction = srn.predict(ex, &star_labels, &constrained_relation_labels);
+    } else {
+      if(isLdf) {
+	for(size_t a=0; a<6; a++){
+          VW::copy_example_data(false, &my_task_data->ldf_relation[a], ex);
+	  update_example_indicies(true, &my_task_data->ldf_relation[a], quadratic_constant, cubic_constant * (uint32_t)(a+5));
+          COST_SENSITIVE::label* lab = (COST_SENSITIVE::label*)my_task_data->ldf_relation[a].ld;
+          lab->costs[0].x = 0.f;
+          lab->costs[0].class_index = (uint32_t)a+5;
+          lab->costs[0].partial_prediction = 0.f;
+          lab->costs[0].wap_value = 0.f;
+	}
+	prediction  = srn.predictLDF(my_task_data->ldf_relation, 6, MULTICLASS::get_example_label(ex)-5)+5;
+      } else {
+        prediction = srn.predict(ex, MULTICLASS::get_example_label(ex), &constrained_relation_labels);
+      }
+    }
     if(my_task_data->history_features && hist[0] != 0) {
       remove_history_from_example(*(srn.all), *hinfo , ex);
     }
@@ -166,17 +236,19 @@ namespace EntityRelationTask {
     return prediction;
   }
 
-  void entity_first_decoding(searn& srn, vector<example*> ec, history_info* hinfo, v_array<size_t>& predictions) {
+  void entity_first_decoding(searn& srn, vector<example*> ec, history_info* hinfo, v_array<size_t>& predictions, bool isLdf=false) {
     // ec.size = #entity + #entity*(#entity-1)/2
     size_t n_ent = (sqrt(ec.size()*8+1)-1)/2;
     // Do entity recognition first
     for (size_t i=0; i<n_ent; i++) {
-      predictions[i] = predict_entity(srn, ec[i], predictions);
+      srn.snapshot(i, 1, &i, sizeof(i), true);
+      predictions[i] = predict_entity(srn, ec[i], predictions, isLdf);
     }
 
     // Now do relation recognition task;
     for (size_t i=n_ent; i<ec.size(); i++) {
-      predictions[i] = predict_relation(srn, ec[i], hinfo, predictions);
+       srn.snapshot(i, 1, &i, sizeof(i), true);
+      predictions[i] = predict_relation(srn, ec[i], hinfo, predictions, isLdf);
     }
   }
 
@@ -264,7 +336,7 @@ namespace EntityRelationTask {
     
     switch(my_task_data->search_order) {
       case 0:
-        entity_first_decoding(srn, ec, hinfo, predictions);
+        entity_first_decoding(srn, ec, hinfo, predictions, false);
         break;
       case 1:
         er_mixed_decoding(srn, ec, hinfo, predictions);
@@ -272,6 +344,9 @@ namespace EntityRelationTask {
       case 2:
         er_allow_skip_decoding(srn, ec, hinfo, predictions);
         break;
+      case 3:
+        entity_first_decoding(srn, ec, hinfo, predictions, true); //LDF = true
+	break;
       default:
         cerr << "search order " << my_task_data->search_order << "is undefined." << endl;
     }
@@ -282,5 +357,16 @@ namespace EntityRelationTask {
         srn.output() << predictions[i] << ' ';
     }
     delete hinfo;
-}
+  }
+   // this is totally bogus for the example -- you'd never actually do this!
+  void update_example_indicies(bool audit, example* ec, uint32_t mult_amount, uint32_t plus_amount) {
+    for (unsigned char* i = ec->indices.begin; i != ec->indices.end; i++)
+      for (feature* f = ec->atomics[*i].begin; f != ec->atomics[*i].end; ++f)
+        f->weight_index = (f->weight_index * mult_amount) + plus_amount;
+    if (audit)
+      for (unsigned char* i = ec->indices.begin; i != ec->indices.end; i++) 
+        if (ec->audit_features[*i].begin != ec->audit_features[*i].end)
+          for (audit_data *f = ec->audit_features[*i].begin; f != ec->audit_features[*i].end; ++f)
+            f->weight_index = (f->weight_index * mult_amount) + plus_amount;
+  }
 }
