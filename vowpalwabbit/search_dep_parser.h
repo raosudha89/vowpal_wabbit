@@ -3,9 +3,7 @@ Copyright (c) by respective owners including Yahoo!, Microsoft, and
 individual contributors. All rights reserved.  Released under a BSD
 license as described in the file LICENSE.
  */
-#ifndef SEARN_DEP_PARSER_H
-#define SEARN_DEP_PARSER_H
-
+#pragma once
 #include "search.h"
 
 namespace DepParserTask {
@@ -15,5 +13,3 @@ namespace DepParserTask {
   void run_before_predict(Search::search&, vector<example*>&);
   extern Search::search_task task;
 }
-
-#endif
