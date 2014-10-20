@@ -10,7 +10,7 @@ license as described in the file LICENSE.
 #include "gd.h"
 #include "ezexample.h"
 
-namespace MulticlassTask { Search::search_task task = { "multiclasstask", run, initialize, finish, NULL, NULL };  }
+namespace MulticlassTask { Search::search_task task = { "multiclasstask", run, initialize, finish, NULL, NULL, NULL };  }
 
 namespace MulticlassTask {
   size_t max_label = 0;

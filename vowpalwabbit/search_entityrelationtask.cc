@@ -13,7 +13,7 @@
 #define R_NONE 10 // label for NONE relation
 #define LABEL_SKIP 11 // label for SKIP
 
-namespace EntityRelationTask { Search::search_task task = { "entity_relation", run, initialize, finish, NULL, NULL };  }
+namespace EntityRelationTask { Search::search_task task = { "entity_relation", run, initialize, finish, NULL, NULL, NULL };  }
 
 
 namespace EntityRelationTask {

@@ -7,10 +7,10 @@ license as described in the file LICENSE.
 #include "multiclass.h"      // needed for non-LDF
 #include "cost_sensitive.h"  // needed for LDF
 
-namespace SequenceTask         { Search::search_task task = { "sequence",          run, initialize, NULL,   NULL,  NULL     }; }
-namespace SequenceSpanTask     { Search::search_task task = { "sequencespan",      run, initialize, finish, setup, takedown }; }
-namespace ArgmaxTask           { Search::search_task task = { "argmax",            run, initialize, NULL,   NULL,  NULL     }; }
-namespace SequenceTask_DemoLDF { Search::search_task task = { "sequence_demoldf",  run, initialize, finish, NULL,  NULL     }; }
+namespace SequenceTask         { Search::search_task task = { "sequence",          run, initialize, NULL,   NULL,  NULL, NULL     }; }
+namespace SequenceSpanTask     { Search::search_task task = { "sequencespan",      run, initialize, finish, setup, takedown, NULL }; }
+namespace ArgmaxTask           { Search::search_task task = { "argmax",            run, initialize, NULL,   NULL,  NULL, NULL     }; }
+namespace SequenceTask_DemoLDF { Search::search_task task = { "sequence_demoldf",  run, initialize, finish, NULL,  NULL, NULL     }; }
 
 namespace SequenceTask {
   void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm) {

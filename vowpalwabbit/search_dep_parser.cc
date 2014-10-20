@@ -18,7 +18,7 @@
 #define cubic_namespace 102 // namespace for cubic feature
 #define offset_const 344429
 
-namespace DepParserTask         {  Search::search_task task = { "dep_parser", run, initialize, finish, NULL, NULL};  }
+namespace DepParserTask         {  Search::search_task task = { "dep_parser", run, initialize, finish, NULL, NULL, run_before_predict};  }
 
 struct task_data {
   example *ex;
@@ -26,6 +26,7 @@ struct task_data {
   bool no_cubic_features;
   bool my_init_flag;
   int nfs;
+  uint32_t idx;
   v_array<uint32_t> valid_actions;
   v_array<uint32_t> valid_labels;
   v_array<uint32_t> gold_heads; // gold labels
@@ -254,13 +255,16 @@ namespace DepParserTask {
   }
 
   // This function needs to be very fast
-  void extract_features(Search::search& srn, uint32_t idx,  vector<example*> &ec) {
+
+  void run_before_predict(Search::search& srn, vector<example*>& ec) {
     task_data *data = srn.get_task_data<task_data>();
+    reset_ex(data->ex);
     size_t ss = srn.get_stride_shift();
     size_t mask = srn.get_mask();
     v_array<uint32_t> &stack = data->stack;
     v_array<uint32_t> *children = data->children, &temp=data->temp;
     v_array<example*> &ec_buf = data->ec_buf;
+  	uint32_t &idx = data->idx;
     example &ex = *(data->ex);
     //add constant
     add_feature(&ex, (uint32_t) constant, constant_namespace, mask, ss);
@@ -410,12 +414,16 @@ namespace DepParserTask {
     }
   }
 
+  void dummy(Search::search& srn, vector<example*>& ec) {}
+
   void run(Search::search& srn, vector<example*>& ec) {
     cdep << "start structured predict"<<endl;
     task_data *data = srn.get_task_data<task_data>();
     v_array<uint32_t> &gold_actions = data->gold_actions, &stack = data->stack, &gold_heads=data->gold_heads, &valid_actions=data->valid_actions, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags, &valid_labels = data->valid_labels;
+
+  	uint32_t &idx = data->idx;
     uint32_t n = ec.size();
-    uint32_t idx = 2;
+    idx = 2;
 
     // initialization
     if(!data->my_init_flag) {
@@ -447,8 +455,8 @@ namespace DepParserTask {
     int count=0;
     cdep << "start decoding"<<endl;
     while(stack.size()>1 || idx <= n){
-      reset_ex(data->ex);
-      extract_features(srn, idx, ec);
+     // reset_ex(data->ex);
+//     run_before_predict(srn, ec);
       get_valid_actions(valid_actions, idx, n, stack.size());
       get_gold_actions(srn, idx, n);
 	  int gold_action = (gold_actions[0] == 1)? 1 :
@@ -458,10 +466,12 @@ namespace DepParserTask {
 			  valid_labels.push_back(1);
 	  if(is_valid(2, valid_actions))
 		  for(size_t i=1; i<=12; i++)
-			  valid_labels.push_back(1+i);
+			  if(i!=8) valid_labels.push_back(1+i); // ignore root label
 	  if(is_valid(3, valid_actions))
 		  for(size_t i=1; i<=12; i++)
-			  valid_labels.push_back(13+i);
+			  if (i!=8) valid_labels.push_back(13+i); // ignore root label
+
+//     run_before_predict(srn, ec);
       uint32_t prediction = Search::predictor(srn, (ptag) 0).set_input(*(data->ex)).set_oracle(gold_action).set_allowed(valid_labels).set_condition_range(count, srn.get_history_length(), 'p').set_learner_id(0).predict();
 	  uint32_t a_id = (prediction==1)?1:((prediction>13)?3:2);
 	  uint32_t t_id = (prediction==1)?-1:((prediction>13)?prediction -13:prediction-1);
@@ -473,7 +483,7 @@ namespace DepParserTask {
     cdep << "root link to the last element in stack" <<  "root ====> " << (stack.last()) << endl;
     srn.loss((gold_heads[stack.last()] != heads[stack.last()]));
     if (srn.output().good())
-      for(size_t i=n-1; i>0; i--) {
+      for(size_t i=1; i<=n; i++){
         cdep << heads[i] << " ";
         srn.output() << (heads[i])<<":"<<tags[i] << endl;
       }

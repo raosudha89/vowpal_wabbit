@@ -133,6 +133,7 @@ namespace Search {
     void (*finish)(search&);
     void (*run_setup)(search&, std::vector<example*>&);
     void (*run_takedown)(search&, std::vector<example*>&);
+    void (*run_before_predict)(search&, std::vector<example*>&);
   };
 
   // to make calls to "predict" (and "predictLDF") cleaner when you

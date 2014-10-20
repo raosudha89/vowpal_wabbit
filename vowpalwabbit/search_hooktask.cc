@@ -8,7 +8,7 @@ license as described in the file LICENSE.
 // this is used for the C++ library and python library hook; hopefully
 // it can be used for any foreign library too!
 namespace HookTask {
-  Search::search_task task = { "hook", run, initialize, finish, NULL, NULL  };
+  Search::search_task task = { "hook", run, initialize, finish, NULL, NULL, NULL  };
 
   void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm) {
     task_data *td = new task_data;

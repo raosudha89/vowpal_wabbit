@@ -174,6 +174,7 @@ namespace Search {
     example*empty_example;
 
     search_task* task;    // your task!
+	search* sch;
   };
 
   string   audit_feature_space("conditional");
@@ -654,7 +655,6 @@ namespace Search {
   
   action single_prediction_notLDF(search_private& priv, example& ec, int policy, const action* allowed_actions, size_t allowed_actions_cnt) {
     vw& all = *priv.all;
-    
     void* old_label = ec.ld;
     ec.ld = allowed_actions_to_ld(priv, 1, allowed_actions, allowed_actions_cnt);
     priv.base_learner->predict(ec, policy);
@@ -886,6 +886,7 @@ namespace Search {
   
   // note: ec_cnt should be 1 if we are not LDF
   action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, const action* allowed_actions, size_t allowed_actions_cnt, size_t learner_id) {
+
     size_t condition_on_cnt = condition_on_names ? strlen(condition_on_names) : 0;
     size_t t = priv.t;
     priv.t++;
@@ -922,6 +923,7 @@ namespace Search {
 
       // check to see if we're done with available actions
       if (priv.learn_a_idx >= valid_action_cnt) {
+      	if (priv.task->run_before_predict) priv.task->run_before_predict(*(priv.sch), priv.ec_seq);
         priv.done_with_all_actions = true;
 
         // set reference or copy example(s)
@@ -986,6 +988,7 @@ namespace Search {
         ((priv.state == LEARN) && (t > priv.learn_t))) {
       // we actually need to run the policy
       
+
       int policy = choose_policy(priv);
       action a;
 
@@ -1009,9 +1012,11 @@ namespace Search {
             for (size_t n=0; n<ec_cnt; n++)
               add_example_conditioning(priv, ecs[n], condition_on, condition_on_cnt, condition_on_names, priv.condition_on_actions.begin);
 
-          if (policy >= 0)   // only make a prediction if we're going to use the output
+          if (policy >= 0) {  // only make a prediction if we're going to use the output
+      		if (priv.task->run_before_predict) priv.task->run_before_predict(*(priv.sch), priv.ec_seq);
             a = priv.is_ldf ? single_prediction_LDF(priv, ecs, ec_cnt, policy)
                             : single_prediction_notLDF(priv, *ecs, policy, allowed_actions, allowed_actions_cnt);
+		  }
           
           if (gte_here) {
             cdbg << "INIT_TRAIN, NO_ROLLOUT, at least one oracle_actions" << endl;
@@ -1567,6 +1572,7 @@ namespace Search {
   learner* setup(vw&all, po::variables_map& vm) {
     search* sch = (search*)calloc_or_die(1,sizeof(search));
     sch->priv = new search_private();
+	sch->priv->sch = sch;
     search_initialize(&all, *sch);
     search_private& priv = *sch->priv;
 
@@ -1982,6 +1988,8 @@ namespace Search {
   predictor& predictor::set_tag(ptag tag) { my_tag = tag; return *this; }
     
   action predictor::predict() {
+
+
     const action* orA = oracle_actions.size() == 0 ? NULL : oracle_actions.begin;
     const ptag*   cOn = condition_on_names.size() == 0 ? NULL : condition_on_tags.begin;
     const char*   cNa = NULL;
