@@ -13,7 +13,8 @@ def run_one(train_data, test_data,  passes, beta, rollout, rollin, refType):
 	system('./vowpalwabbit/vw -d %s -i %s -t -c  -p %s '%(test_data,model,tmpout))
 
 rollin_pool = ['oracle','policy']
-beta_pool = ['0', '0.5' , '1']
+beta_pool = ['0',  '0.5','1']
+beta_pool = ['0.25',  '0.75']
 refType_pool = ['optimal',  'bad']
 rollout = "mix_per_roll"
 train_data = 'mnist.train.srh' 

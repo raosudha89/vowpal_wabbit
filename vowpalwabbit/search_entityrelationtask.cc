@@ -25,6 +25,7 @@ namespace EntityRelationTask {
     float skip_cost;
     bool constraints;
     bool allow_skip;
+	bool badref;
     v_array<uint32_t> y_allowed_entity;
     v_array<uint32_t> y_allowed_relation;
     int search_order;
@@ -40,7 +41,8 @@ namespace EntityRelationTask {
     sspan_opts.add_options()
         ("relation_cost", po::value<float>(&(my_task_data->relation_cost))->default_value(1.0), "Relation Cost")
         ("entity_cost", po::value<float>(&(my_task_data->entity_cost))->default_value(1.0), "Entity Cost")
-        ("constraints", "Use Constraints")
+		("constraints", "Use Constraints")
+        ("badref", "Use a random ref")
         ("relation_none_cost", po::value<float>(&(my_task_data->relation_none_cost))->default_value(0.5), "None Relation Cost")
         ("skip_cost", po::value<float>(&(my_task_data->skip_cost))->default_value(0.01f), "Skip Cost (only used when search_order = skip")
         ("search_order", po::value<int>(&(my_task_data->search_order))->default_value(0), "Search Order 0: EntityFirst 1: Mix 2: Skip 3: EntityFirst(LDF)" );
@@ -50,6 +52,7 @@ namespace EntityRelationTask {
     // Entity label 1:E_Other 2:E_Peop 3:E_Org 4:E_Loc
     // Relation label 5:R_Live_in 6:R_OrgBased_in 7:R_Located_in 8:R_Work_For 9:R_Kill 10:R_None
     my_task_data->constraints = vm.count("constraints") > 0;
+    my_task_data->badref = vm.count("badref") > 0;
 
     for(int i=1; i<5; i++)
       my_task_data->y_allowed_entity.push_back(i);
@@ -141,9 +144,12 @@ namespace EntityRelationTask {
           lab.costs[0].partial_prediction = 0.f;
           lab.costs[0].wap_value = 0.f;
         }
-        prediction = Search::predictor(sch, my_tag).set_input(my_task_data->ldf_entity, 4).set_oracle(ex->l.multi.label-1).set_learner_id(1).predict() + 1;
+	    prediction = Search::predictor(sch, my_tag).set_input(my_task_data->ldf_entity, 4).set_oracle(ex->l.multi.label-1).set_learner_id(1).predict() + 1;
       } else {
-        prediction = Search::predictor(sch, my_tag).set_input(*ex).set_oracle(ex->l.multi.label).set_allowed(my_task_data->y_allowed_entity).set_learner_id(0).predict();
+		if(my_task_data->badref)
+	        prediction = Search::predictor(sch, my_tag).set_input(*ex).set_oracle(1).set_allowed(my_task_data->y_allowed_entity).set_learner_id(0).predict();
+		else
+	        prediction = Search::predictor(sch, my_tag).set_input(*ex).set_oracle(ex->l.multi.label).set_allowed(my_task_data->y_allowed_entity).set_learner_id(0).predict();
       }
     }
 
@@ -201,7 +207,10 @@ namespace EntityRelationTask {
         size_t pred_pos = Search::predictor(sch, my_tag).set_input(my_task_data->ldf_relation, constrained_relation_labels.size()).set_oracle(correct_label).set_learner_id(2).predict();
         prediction = constrained_relation_labels[pred_pos];
       } else {
-        prediction = Search::predictor(sch, my_tag).set_input(*ex).set_oracle(ex->l.multi.label).set_allowed(constrained_relation_labels).set_learner_id(1).predict();
+		if(my_task_data->badref)
+	        prediction = Search::predictor(sch, my_tag).set_input(*ex).set_oracle(1).set_allowed(constrained_relation_labels).set_learner_id(1).predict();
+		else
+	        prediction = Search::predictor(sch, my_tag).set_input(*ex).set_oracle(ex->l.multi.label).set_allowed(constrained_relation_labels).set_learner_id(1).predict();
       }
     }
 

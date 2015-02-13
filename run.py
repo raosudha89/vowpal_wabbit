@@ -20,7 +20,8 @@ def run_one(train_data, test_data, test_ori_data, passes, beta, rollout, rollin,
 #rollin_pool = ['oracle','policy']
 #beta_pool = ['0', '0.5' , '1']
 refType_pool = ['optimal', 'sub', 'bad']
-beta_pool = ['1']
+#beta_pool = ['1']
+beta_pool = ['0.25', '0.75']
 rollin_pool = ['policy']
 
 rollout = "mix_per_roll"

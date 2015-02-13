@@ -1,6 +1,6 @@
 SHELL=/bin/bash
 VW=../../vowpalwabbit/vw
-search_option=--constraints --search_alpha 1e-8
+search_option= --search_alpha 1e-8 --search_rollin policy --search_beta 0.5  --search_rollout mix_per_roll --constraints 
 eval_script=./evaluationER.py
 
 .SECONDARY:
