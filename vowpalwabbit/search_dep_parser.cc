@@ -529,7 +529,7 @@ namespace DepParserTask {
 	  }
 
 	  gold_action = (gold_action == 1)? 1 :
-			(gold_tags[stack.last()] + ((gold_action==2)?1:13));
+			(gold_tags[stack.last()] + ((gold_action==2)?1:(1+num_labels)));
 	  valid_labels.erase();
 	  if(is_valid(1, valid_actions))
 			  valid_labels.push_back(1);
@@ -542,7 +542,7 @@ namespace DepParserTask {
 		count++;
       uint32_t prediction= Search::predictor(srn, (ptag) 0).set_input(*(data->ex)).set_oracle(gold_action).set_allowed(valid_labels).set_condition_range(count, srn.get_history_length(), 'p').set_learner_id(0).predict();
   	  uint32_t a_id = (prediction==1)?1:((prediction>(1+num_labels))?3:2);
-	  uint32_t t_id = (prediction==1)?-1:((prediction>(1+num_labels))?(prediction -1-num_labels):prediction-1);
+	  uint32_t t_id = (prediction==1)?-1:((prediction>(1+num_labels))?(prediction -1-num_labels):(prediction-1));
 /*
       // Predict the next action {SHIFT, REDUCE_LEFT, REDUCE_RIGHT}
       uint32_t a_id= Search::predictor(srn, (ptag) 0).set_input(*(data->ex)).set_oracle(gold_action).set_allowed(valid_actions).set_condition_range(count, srn.get_history_length(), 'p').set_learner_id(0).predict();
