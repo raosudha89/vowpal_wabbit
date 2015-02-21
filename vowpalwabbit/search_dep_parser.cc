@@ -179,14 +179,14 @@ namespace DepParserTask {
         children[1][stack[stack.size()-2]]++;
         tags[stack.last()] = t_id;
 
-        srn.loss(!(gold_heads[stack.last()] == heads[stack.last()]) && (gold_tags[stack.last()] == t_id));
+//        srn.loss(!(gold_heads[stack.last()] == heads[stack.last()]) && (gold_tags[stack.last()] == t_id));
 //		srn.loss((gold_heads[stack.last()] != heads[stack.last()])+(gold_tags[stack.last()] != t_id));
-		/*if(gold_heads[stack.last()] != heads[stack.last()])
+		if(gold_heads[stack.last()] != heads[stack.last()])
 			srn.loss(2);
 		else if (gold_tags[stack.last()] != t_id)
 			srn.loss(1);
 		else
-			srn.loss(0);*/
+			srn.loss(0);
         stack.pop();
         return idx;
 
@@ -199,13 +199,13 @@ namespace DepParserTask {
         children[0][idx]++;
         tags[stack.last()] = t_id;
 //		srn.loss((gold_heads[stack.last()] != heads[stack.last()])+(gold_tags[stack.last()] != t_id));
-/*		if(gold_heads[stack.last()] != heads[stack.last()])
+		if(gold_heads[stack.last()] != heads[stack.last()])
 			srn.loss(2);
 		else if (gold_tags[stack.last()] != t_id)
 			srn.loss(1);
 		else
-			srn.loss(0);*/
-      srn.loss(!(gold_heads[stack.last()] == heads[stack.last()]) && (gold_tags[stack.last()] == t_id));
+			srn.loss(0);
+//      srn.loss(!(gold_heads[stack.last()] == heads[stack.last()]) && (gold_tags[stack.last()] == t_id));
         stack.pop();
         return idx;
     }
@@ -483,6 +483,7 @@ namespace DepParserTask {
     task_data *data = srn.get_task_data<task_data>();
 
     v_array<uint32_t> &stack=data->stack, &gold_heads=data->gold_heads, &valid_actions=data->valid_actions, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags, &valid_labels=data->valid_labels;
+	size_t	&num_labels = data->num_label;
     uint32_t n = (uint32_t) ec.size();
 
     uint32_t idx = 2;
@@ -533,15 +534,15 @@ namespace DepParserTask {
 	  if(is_valid(1, valid_actions))
 			  valid_labels.push_back(1);
 	  if(is_valid(2, valid_actions))
-		  for(size_t i=1; i<=12; i++)
+		  for(size_t i=1; i<=num_labels; i++)
 			  valid_labels.push_back(1+i);
 	  if(is_valid(3, valid_actions))
-		  for(size_t i=1; i<=12; i++)
-			  valid_labels.push_back(13+i);
+		  for(size_t i=1; i<=num_labels; i++)
+			  valid_labels.push_back(1+num_labels+i);
 		count++;
       uint32_t prediction= Search::predictor(srn, (ptag) 0).set_input(*(data->ex)).set_oracle(gold_action).set_allowed(valid_labels).set_condition_range(count, srn.get_history_length(), 'p').set_learner_id(0).predict();
-  	  uint32_t a_id = (prediction==1)?1:((prediction>13)?3:2);
-	  uint32_t t_id = (prediction==1)?-1:((prediction>13)?prediction -13:prediction-1);
+  	  uint32_t a_id = (prediction==1)?1:((prediction>(1+num_labels))?3:2);
+	  uint32_t t_id = (prediction==1)?-1:((prediction>(1+num_labels))?(prediction -1-num_labels):prediction-1);
 /*
       // Predict the next action {SHIFT, REDUCE_LEFT, REDUCE_RIGHT}
       uint32_t a_id= Search::predictor(srn, (ptag) 0).set_input(*(data->ex)).set_oracle(gold_action).set_allowed(valid_actions).set_condition_range(count, srn.get_history_length(), 'p').set_learner_id(0).predict();
