@@ -238,7 +238,7 @@ namespace DepParserTask {
     size_t pos = 0;
     if(!data->no_quadratic_features){
       // quadratic feature encoding
-      string quadratic_feature_template = "s1-s2 s1-b1 s1-s1 s2-s2 s3-s3 b1-b1 b2-b2 b3-b3 b1-b2 s1-sl1 s1-sr1 b1-bl1 s1-b1-sl1 s1-b1-s21 s1-b1-sr1 ENDQ";
+      string quadratic_feature_template = "s1-s2 s1-b1 s1-s1 s2-s2 s3-s3 b1-b1 b2-b2 b3-b3 b1-b2 s1-sl1 s1-sr1 b1-bl1 ENDQ";
 
       // Generate quadratic features templete
       while ((pos = quadratic_feature_template.find(" ")) != std::string::npos) {
@@ -270,7 +270,7 @@ namespace DepParserTask {
     // Generate cubic features
 
     if(!data->no_cubic_features){
-      string cubic_feature_template = "b1-b2-b3 s1-b1-b2 s1-s2-b1 s1-s2-s3 s1-b1-bl1 b1-bl1-bl2 s1-sl1-sl2 s1-s2-s2 s1-sr1-b1 s1-sl1-b1 s1-sr1-sr2 ENDC";
+      string cubic_feature_template = "b1-b2-b3 s1-b1-b2 s1-s2-b1 s1-s2-s3 s1-b1-bl1 b1-bl1-bl2 s1-sl1-sl2 s1-s2-s2 s1-sr1-b1 s1-sl1-b1 s1-sr1-sr2 s1-b1-sl1 s1-b1-s21 s1-b1-sr1 ENDC";
       while ((pos = cubic_feature_template.find(" ")) != std::string::npos) {
         string token = cubic_feature_template.substr(0, pos);
         char first_fs_idx = fs_idx_map[token.substr(0,token.find("-"))];
@@ -348,12 +348,18 @@ namespace DepParserTask {
           continue;
 
         uint32_t additional_offset = (uint32_t)((i*nfs+j)*offset_const);
-        for(size_t k=0; k<ec[0]->atomics[*fs].size(); k++) {
-          if(!ec_buf[i])
-            v0 = affix_constant*((j+1)*quadratic_constant + k);
-          else
-            v0 = (ec_buf[i]->atomics[*fs][k].weight_index>>ss);
-          add_feature(&ex, (uint32_t) v0 + additional_offset, (unsigned char)(i*nfs+j), mask, ss);
+
+        if(!ec_buf[i]){
+        	for(size_t k=0; k<ec[0]->atomics[*fs].size(); k++) {
+        	    v0 = affix_constant*((j+1)*quadratic_constant + k);
+	            add_feature(&ex, (uint32_t) v0 + additional_offset, (unsigned char)(i*nfs+j), mask, ss);
+			}
+		}
+        else {
+        	for(size_t k=0; k<ec_buf[i]->atomics[*fs].size(); k++) {
+    	        v0 = (ec_buf[i]->atomics[*fs][k].weight_index>>ss);
+	            add_feature(&ex, (uint32_t) v0 + additional_offset, (unsigned char)(i*nfs+j), mask, ss);
+			}
         }
         j++;
       }
