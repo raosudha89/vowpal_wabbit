@@ -515,8 +515,10 @@ void enable_sources(vw& all, bool quiet, size_t passes)
 	    {
 	      // fork() returns pid if parent, 0 if child
 	      // store fork value and run child process if child
-	      if ((children[i] = fork()) == 0)
+	      if ((children[i] = fork()) == 0) {
+                all.quiet |= (i > 0);
 		goto child;
+              }
 	    }
 
 	  // install signal handler so we can kill children when killed
@@ -546,8 +548,10 @@ void enable_sources(vw& all, bool quiet, size_t passes)
 	      for (size_t i = 0; i < num_children; i++)
 		if (pid == children[i])
 		  {
-		    if ((children[i]=fork()) == 0)
+		    if ((children[i]=fork()) == 0) {
+                      all.quiet |= (i > 0);
 		      goto child;
+                    }
 		    break;
 		  }
 	    }
@@ -622,7 +626,7 @@ void enable_sources(vw& all, bool quiet, size_t passes)
       throw exception();
     }
   all.p->input->count = all.p->input->files.size();
-  if (!quiet)
+  if (!quiet && !all.daemon)
     cerr << "num sources = " << all.p->input->files.size() << endl;
 }
 
@@ -1197,10 +1201,12 @@ void free_parser(vw& all)
   if(all.ngram_strings.size() > 0)
     all.p->gram_mask.delete_v();
   
-  for (size_t i = 0; i < all.p->ring_size; i++) 
-    {
+  if (all.p->lp.parse_label == MULTILABEL::multilabel.parse_label)
+    for (size_t i = 0; i < all.p->ring_size; i++) 
+      dealloc_example(all.p->lp.delete_label, all.p->examples[i], all.p->lp.delete_label);
+  else
+    for (size_t i = 0; i < all.p->ring_size; i++) 
       dealloc_example(all.p->lp.delete_label, all.p->examples[i]);
-    }
   free(all.p->examples);
   
   io_buf* output = all.p->output;

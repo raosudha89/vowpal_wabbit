@@ -14,10 +14,12 @@
 namespace GD{
   LEARNER::base_learner* setup(vw& all);
 
+  struct gd;
+
   float finalize_prediction(shared_data* sd, float ret);
   void print_audit_features(vw&, example& ec);
   void save_load_regressor(vw& all, io_buf& model_file, bool read, bool text);
-  void save_load_online_state(vw& all, io_buf& model_file, bool read, bool text);
+  void save_load_online_state(vw& all, io_buf& model_file, bool read, bool text, GD::gd *g = NULL);
 
   // iterate through one namespace (or its part), callback function T(some_data_R, feature_value_x, feature_weight)
   template <class R, void (*T)(R&, const float, float&)>
@@ -50,7 +52,7 @@ namespace GD{
         v_array<feature> temp = ec.atomics[(unsigned char)(*i)[0]];
         for (; temp.begin != temp.end; temp.begin++)
         {
-          uint32_t halfhash = quadratic_constant * (temp.begin->weight_index + offset);
+          uint32_t halfhash = quadratic_constant * (temp.begin->weight_index);
        
           foreach_feature<R,T>(all.reg.weight_vector, all.reg.weight_mask, ec.atomics[(unsigned char)(*i)[1]].begin, ec.atomics[(unsigned char)(*i)[1]].end, dat, 
                                halfhash, temp.begin->x);
@@ -65,7 +67,7 @@ namespace GD{
         v_array<feature> temp2 = ec.atomics[(unsigned char)(*i)[1]];
         for (; temp2.begin != temp2.end; temp2.begin++) {
            
-          uint32_t halfhash = cubic_constant2 * (cubic_constant * (temp1.begin->weight_index + offset) + temp2.begin->weight_index + offset);
+          uint32_t halfhash = cubic_constant2 * (cubic_constant * (temp1.begin->weight_index) + temp2.begin->weight_index);
           float mult = temp1.begin->x * temp2.begin->x;
           foreach_feature<R,T>(all.reg.weight_vector, all.reg.weight_mask, ec.atomics[(unsigned char)(*i)[2]].begin, ec.atomics[(unsigned char)(*i)[2]].end, dat, halfhash, mult);
         }
@@ -80,7 +82,7 @@ namespace GD{
     foreach_feature<R,float&,T>(all, ec, dat);
   }
 
- inline void vec_add(float& p, const float fx, float& fw) { p += fw * fx; }
+  inline void vec_add(float& p, const float fx, float& fw) { p += fw * fx; }
 
   inline float inline_predict(vw& all, example& ec)
   {
