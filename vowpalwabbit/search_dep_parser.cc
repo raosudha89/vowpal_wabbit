@@ -423,7 +423,7 @@ namespace DepParserTask {
 
     // dependency with SHIFT
     for(uint32_t i = 0; i<stack.size(); i++)
-   	  if(gold_heads[stack[i]] == idx || gold_heads[idx] == stack[i])
+   	  if(idx <=n && (gold_heads[stack[i]] == idx || gold_heads[idx] == stack[i]))
 		  gold_action_reward[1] -= 1;
 
     // dependency with left and right
