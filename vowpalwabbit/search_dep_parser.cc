@@ -18,12 +18,13 @@ namespace DepParserTask         {  Search::search_task task = { "dep_parser", ru
 struct task_data {
   example *ex;
   size_t root_label, num_label;
-  v_array<uint32_t> valid_actions, action_loss, gold_heads, gold_tags, stack, heads, tags, temp;
+  v_array<uint32_t> valid_actions, action_loss, gold_heads, gold_tags, stack, heads, tags, temp, valid_action_temp;
+  v_array<action> gold_actions, gold_action_temp;
   v_array<pair<action, float>> gold_action_losses;
   v_array<uint32_t> children[6]; // [0]:num_left_arcs, [1]:num_right_arcs; [2]: leftmost_arc, [3]: second_leftmost_arc, [4]:rightmost_arc, [5]: second_rightmost_arc
   example * ec_buf[13];
   bool old_style_labels;
-  bool cost_to_go;
+  bool cost_to_go, one_learner, las_loss;
 };
 
 namespace DepParserTask {
@@ -39,14 +40,15 @@ namespace DepParserTask {
 	for(size_t i=0; i<4; i++)
 		data->action_loss.push_back(0);
     data->ex = NULL;
-    sch.set_num_learners(3);
     sch.set_task_data<task_data>(data);
     
 	new_options(all, "Dependency Parser Options")		
         ("root_label", po::value<size_t>(&(data->root_label))->default_value(8), "Ensure that there is only one root in each sentence")
         ("num_label", po::value<size_t>(&(data->num_label))->default_value(12), "Number of arc labels")
         ("old_style_labels", "Use old hack of label information")
-        ("cost_to_go", "Estimating cost-to-go matrix based on dynamic oracle rathan than rolling-out");
+        ("one_learner", "Using one learner instead of three learners for labeled parser")
+		("las_loss", "las_loss")
+		("cost_to_go", "Estimating cost-to-go matrix based on dynamic oracle rathan than rolling-out");
 	add_options(all);
 
 	check_option<size_t>(data->root_label, all, vm, "root_label", false, size_equal,
@@ -57,7 +59,10 @@ namespace DepParserTask {
                          "warning: you specified a different value for --old_style_labels than the one loaded from regressor. proceeding with loaded value: ");
     check_option(data->cost_to_go, all, vm, "cost_to_go", false,
                          "warning: you specified a different value for --cost_to_go than the one loaded from regressor. proceeding with loaded value: ");
-
+    check_option(data->las_loss, all, vm, "las_loss", false,
+                         "warning: you specified a different value for --las_loss than the one loaded from regressor. proceeding with loaded value: ");
+    check_option(data->one_learner, all, vm, "one_learner", false,
+                         "warning: you specified a different value for --one_learner than the one loaded from regressor. proceeding with loaded value: ");
     data->ex = VW::alloc_examples(sizeof(polylabel), 1);
     data->ex->indices.push_back(val_namespace);
     for(size_t i=1; i<14; i++)
@@ -66,10 +71,15 @@ namespace DepParserTask {
 
     data->old_style_labels = vm.count("old_style_labels") > 0;
     	
+
+	if(data->one_learner)
+       sch.set_num_learners(1);
+	else
+ 	   sch.set_num_learners(3);
     const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
-    const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BJE", "BHE", "BJK", "BEH", "BEN", "BEJ"};
+    const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
     vector<string> newpairs(pair, pair+19);
-    vector<string> newtriples(triple, triple+14);
+    vector<string> newtriples(triple, triple+12);
     all.pairs.swap(newpairs);
     all.triples.swap(newtriples);
 
@@ -84,12 +94,13 @@ namespace DepParserTask {
 	    sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING | ACTION_COSTS);
 	else
 	    sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING );
-    sch.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
+    sch.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });	
   }
 
   void finish(Search::search& sch) {
     task_data *data = sch.get_task_data<task_data>();
     data->valid_actions.delete_v();
+	data->valid_action_temp.delete_v();
     data->gold_heads.delete_v();
     data->gold_tags.delete_v();
     data->stack.delete_v();
@@ -97,7 +108,9 @@ namespace DepParserTask {
     data->tags.delete_v();
     data->temp.delete_v();
     data->action_loss.delete_v();
+	data->gold_actions.delete_v();
 	data->gold_action_losses.delete_v();
+	data->gold_action_temp.delete_v();
 	VW::dealloc_example(COST_SENSITIVE::cs_label.delete_label, *data->ex);
     free(data->ex);
     for (size_t i=0; i<6; i++) data->children[i].delete_v();
@@ -140,6 +153,7 @@ namespace DepParserTask {
   // arc-hybrid System.
   uint32_t transition_hybrid(Search::search& sch, uint32_t a_id, uint32_t idx, uint32_t t_id) {
     task_data *data = sch.get_task_data<task_data>();
+	bool &las_loss = data->las_loss;
     v_array<uint32_t> &heads=data->heads, &stack=data->stack, &gold_heads=data->gold_heads, &gold_tags=data->gold_tags, &tags = data->tags;
     v_array<uint32_t> *children = data->children;
     if (a_id == SHIFT) {
@@ -153,7 +167,10 @@ namespace DepParserTask {
       children[4][hd] = last;
       children[1][hd] ++;
       tags[last]      = t_id;
-      sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
+	  if(las_loss)
+        sch.loss((gold_heads[last] != heads[last]) || (gold_tags[last] != t_id) );
+	  else // default: las+uas
+        sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
         assert(! stack.empty());
         stack.pop();
         return idx;
@@ -164,7 +181,10 @@ namespace DepParserTask {
       children[2][idx] = last;
       children[0][idx] ++;
       tags[last]       = t_id;
-      sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
+	  if(las_loss)
+        sch.loss((gold_heads[last] != heads[last]) || (gold_tags[last] != t_id) );
+	  else // default: las+uas
+	      sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
         assert(! stack.empty());
         stack.pop();
         return idx;
@@ -259,7 +279,7 @@ namespace DepParserTask {
   }
 
   bool is_valid(uint32_t action, v_array<uint32_t> valid_actions) {
-    for(size_t i=0; i< valid_actions.size(); i++)
+    for(size_t i=0; i<valid_actions.size(); i++)
       if(valid_actions[i] == action)
         return true;
     return false;
@@ -382,6 +402,7 @@ namespace DepParserTask {
     gold_tags.push_back(0);
     for (size_t i=0; i<n; i++) {
       v_array<COST_SENSITIVE::wclass>& costs = ec[i]->l.cs.costs;
+
       uint32_t head,tag;
       if (data->old_style_labels) {
         uint32_t label = costs[0].class_index;
@@ -405,9 +426,11 @@ namespace DepParserTask {
   
   void run(Search::search& sch, vector<example*>& ec) {
     task_data *data = sch.get_task_data<task_data>();
-    v_array<uint32_t> &stack=data->stack, &gold_heads=data->gold_heads, &valid_actions=data->valid_actions, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
+    v_array<uint32_t> &stack=data->stack, &gold_heads=data->gold_heads, &valid_actions=data->valid_actions, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags, &valid_action_temp = data->valid_action_temp, &gold_action_temp = data->gold_action_temp;
 	v_array<pair<action, float>> &gold_action_losses=data->gold_action_losses;
-	bool &cost_to_go = data->cost_to_go;
+	v_array<action> &gold_actions = data->gold_actions;
+	bool &cost_to_go = data->cost_to_go, &one_learner = data->one_learner;
+	size_t &num_label = data->num_label;
     uint32_t n = (uint32_t) ec.size();
 
     stack.erase();
@@ -416,7 +439,6 @@ namespace DepParserTask {
       for(size_t j=0; j<n+1; j++)
         data->children[i][j] = 0;
     
-    v_array<action> gold_actions = v_init<action>();
     int count=1;
     uint32_t idx = ((data->root_label==0)?1:2);
     while(stack.size()>1 || idx <= n){
@@ -424,56 +446,93 @@ namespace DepParserTask {
         extract_features(sch, idx, ec);
       
       get_valid_actions(valid_actions, idx, n, (uint32_t) stack.size(), stack.empty() ? 0 : stack.last());      
-	  uint32_t a_id = 0;
-	  if(cost_to_go){
-		  get_gold_action_losses(sch, idx, n, gold_action_losses);
-		  a_id= Search::predictor(sch, (ptag) count)
+	  uint32_t a_id = 0, t_id = 0;
+
+	  if(one_learner){	      
+       	  uint32_t gold_label = gold_tags[stack.last()];
+		  get_gold_actions(sch, idx, n, gold_actions);
+		  valid_action_temp.erase();
+		  gold_action_temp.erase();
+		  if(is_valid(SHIFT, valid_actions))
+			  valid_action_temp.push_back(SHIFT);
+		  if(is_valid(REDUCE_RIGHT, valid_actions))
+			 for(size_t i=0; i< num_label; i++)
+				if(i!=data->root_label-1)
+				 	valid_action_temp.push_back(i+2);
+		  if(is_valid(REDUCE_LEFT, valid_actions))
+			  for(size_t i=0; i<num_label; i++)
+				  if(i!=data->root_label-1)
+					  valid_action_temp.push_back(i+2+num_label);
+		  if(is_valid(SHIFT, gold_actions))
+			  gold_action_temp.push_back(SHIFT);
+		  if(is_valid(REDUCE_RIGHT, gold_actions))
+			  gold_action_temp.push_back(1+gold_label);
+		  if(is_valid(REDUCE_LEFT, gold_actions))
+			  gold_action_temp.push_back(1+gold_label+num_label);
+
+		  a_id = Search::predictor(sch, (ptag) count)
+                              .set_input(*(data->ex))
+                              .set_oracle(gold_action_temp)
+                              .set_allowed(valid_action_temp)
+                              .set_condition_range(count-1, sch.get_history_length(), 'p')
+                              .set_learner_id(0)
+                              .predict();
+		  if (a_id == 1){
+			  t_id = 0;
+		  } else if(a_id>1 && a_id-1 <= num_label) {
+			  t_id = a_id-1; 
+			  a_id = 2;
+		  } else {
+			  t_id = a_id-num_label-1;
+		      a_id = 3;
+		  }
+	  }
+      else {
+		  if(cost_to_go){
+			  get_gold_action_losses(sch, idx, n, gold_action_losses);
+			  a_id= Search::predictor(sch, (ptag) count)
                               .set_input(*(data->ex))
                               .set_allowed(gold_action_losses)
                               .set_condition_range(count-1, sch.get_history_length(), 'p')
                               .set_learner_id(0)
                               .predict();
-
-	  } else {
-	      get_gold_actions(sch, idx, n, gold_actions);
-		  a_id= Search::predictor(sch, (ptag) count)
+		  } else {
+	    	  get_gold_actions(sch, idx, n, gold_actions);
+			  a_id= Search::predictor(sch, (ptag) count)
                               .set_input(*(data->ex))
                               .set_oracle(gold_actions)
                               .set_allowed(valid_actions)
                               .set_condition_range(count-1, sch.get_history_length(), 'p')
                               .set_learner_id(0)
                               .predict();
+		  }
 
-	  }
-
-      // Predict the next action {SHIFT, REDUCE_LEFT, REDUCE_RIGHT}
-      count++;
+    	  // Predict the next action {SHIFT, REDUCE_LEFT, REDUCE_RIGHT}
+    	  count++;
       
-      uint32_t t_id = 0; // gold_tags[stack.last()]; // 0;
-      if (a_id != SHIFT) {
-        uint32_t gold_label = gold_tags[stack.last()];
-		if(cost_to_go){
+     	  uint32_t t_id = 0; // gold_tags[stack.last()]; // 0;
+     	  if (a_id != SHIFT) {
+       		uint32_t gold_label = gold_tags[stack.last()];
+			if(cost_to_go){
 			gold_action_losses.erase();
-			for(size_t i=1; i<= data->num_label; i++)			
-				gold_action_losses.push_back(make_pair(i, i != gold_label));
-    	    t_id = Search::predictor(sch, (ptag) count)
+				for(size_t i=1; i<= data->num_label; i++)			
+					gold_action_losses.push_back(make_pair(i, i != gold_label));
+    		    t_id = Search::predictor(sch, (ptag) count)
                         .set_input(*(data->ex))	
                         .set_allowed(gold_action_losses)
                         .set_condition_range(count-1, sch.get_history_length(), 'p')
                         .set_learner_id(a_id-1)
                         .predict();
-		} else {
-    	    t_id = Search::predictor(sch, (ptag) count)
+			} else {
+   		 	    t_id = Search::predictor(sch, (ptag) count)
                         .set_input(*(data->ex))
                         .set_oracle(gold_label)						
                         .set_condition_range(count-1, sch.get_history_length(), 'p')
                         .set_learner_id(a_id-1)
                         .predict();
-
-
-		}
-
-      }
+		    }
+      	  }
+	  }
       count++;
       idx = transition_hybrid(sch, a_id, idx, t_id);
     }
