@@ -8,6 +8,7 @@ license as described in the file LICENSE.
 
 [![Build Status](https://travis-ci.org/JohnLangford/vowpal_wabbit.png)](https://travis-ci.org/JohnLangford/vowpal_wabbit)
 [![Windows Build Status](https://ci.appveyor.com/api/projects/status/github/JohnLangford/vowpal_wabbit?branch=master&svg=true)](https://ci.appveyor.com/project/JohnLangford/vowpal-wabbit)
+[![Coverage Status](https://coveralls.io/repos/JohnLangford/vowpal_wabbit/badge.svg)](https://coveralls.io/r/JohnLangford/vowpal_wabbit)
 
 This is the *vowpal wabbit* fast online learning code.  For Windows, look at README.windows.txt
 
@@ -17,6 +18,7 @@ These prerequisites are usually pre-installed on many platforms. However, you ma
 manager (*yum*, *apt*, *MacPorts*, *brew*, ...) to install missing software.
 
 - [Boost](http://www.boost.org) library, with the `Boost::Program_Options` library option enabled.
+- lsb-release  (RedHat/CentOS: redhat-lsb-core, Debian: lsb-release, Ubuntu: you're all set, OSX: not required)
 - GNU *autotools*: *autoconf*, *automake*, *libtool*, *autoheader*, et. al. This is not a strict prereq. On many systems (notably Ubuntu with `libboost-program-options-dev` installed), the provided `Makefile` works fine.
 - (optional) [git](http://git-scm.com) if you want to check out the latest version of *vowpal wabbit*,
   work on the code, or even contribute code to the main project.
@@ -67,16 +69,16 @@ example flags.
 
 ## C++ Optimization
 
-The default C++ compiler optimization flags are very aggressive. If you should run into a problem, consider running `configure` with the `--enable-debug` option, e.g.:
+The default C++ compiler optimization flags are very aggressive. If you should run into a problem, consider creating and running `configure` with the `--enable-debug` option, e.g.:
 
 ```
 $ ./configure --enable-debug
 ```
 
-or passing your own compiler flags via the `CXXOPTIMIZE` make variable:
+or passing your own compiler flags via the `OPTIM_FLAGS` make variable:
 
 ```
-$ make CXXOPTIMIZE="-O0 -g"
+$ make OPTIM_FLAGS="-O0 -g"
 ```
 
 ## Ubuntu/Debian specific info
@@ -85,8 +87,8 @@ On Ubuntu/Debian/Mint and similar the following sequence should work
 for building the latest from github:
 
 ```
-# -- Get libboost program-options:
-apt-get install libboost-program-options-dev
+# -- Get libboost program-options and zlib:
+apt-get install libboost-program-options-dev zlib1g-dev
 
 # -- Get the python libboost bindings (python subdir) - optional:
 apt-get install libboost-python-dev
@@ -126,19 +128,22 @@ make CXX='clang++ -static' clean vw test     # ignore warnings
 OSX requires _glibtools_, which is available via the [brew](http://brew.sh) or
 [MacPorts](https://www.macports.org) package managers.
 
-### Complete brew install of 7.10
+### Complete brew install of 8.0
 ```
 brew install vowpal-wabbit
 ```
 [The homebrew formula for VW is located on github](https://github.com/Homebrew/homebrew/blob/master/Library/Formula/vowpal-wabbit.rb).
 
-### brew install dependencies + manual install of vowpal wabbit
+### Manual install ov Vowpal Wabbit
+#### OSX Dependencies (if using Brew): 
 ```
 brew install libtool
+brew install autoconf
+brew install automake
 brew install boost --with-python
 ```
 
-### MacPorts
+#### OSX Dependencies (if using MacPorts):
 ```
 ## Install glibtool and other GNU autotool friends:
 $ port install libtool autoconf automake
@@ -150,6 +155,7 @@ $ port install boost +no_single +no_static +openmpi +python27 configure.cxx_stdl
 $ port install boost +no_single +no_static +openmpi +python27
 ```
 
+#### OSX Manual compile:
 *Mac OS X 10.8 and below*: ``configure.cxx_stdlib=libc++`` and ``configure.cxx=clang++`` ensure that ``clang++`` uses
 the correct C++11 functionality while building Boost. Ordinarily, ``clang++`` relies on the older GNU ``g++`` 4.2 series
 header files and ``stdc++`` library; ``libc++`` is the ``clang`` replacement that provides newer C++11 functionality. If
@@ -162,3 +168,11 @@ $ sh autogen.sh --enable-libc++
 $ make
 $ make test    # (optional)
 ```
+
+## Code Documentation
+
+To browse the code more easily, do
+
+make doc
+
+and then point your browser to doc/html/index.html .

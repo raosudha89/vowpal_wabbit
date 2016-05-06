@@ -8,8 +8,8 @@ ifneq ($(CXX),)
 else
   CXX = clang++
   $(warning Using clang++)
-ARCH = $(shell test `g++ -v 2>&1 | tail -1 | cut -d ' ' -f 3 | cut -d '.' -f 1,2` \< 4.3 && echo -march=nocona || echo -march=native)
 endif
+#ARCH = $(shell test `$CXX -v 2>&1 | tail -1 | cut -d ' ' -f 3 | cut -d '.' -f 1,2` \< 4.3 && echo -march=nocona || echo -march=native)
 
 ifeq ($(CXX),)
   $(warning No compiler found)
@@ -19,7 +19,7 @@ endif
 UNAME := $(shell uname)
 LIBS = -l boost_program_options -l pthread -l z
 BOOST_INCLUDE = -I /usr/include
-BOOST_LIBRARY = -L /usr/lib
+BOOST_LIBRARY = -L /usr/local/lib -L /usr/lib
 NPROCS := 1
 
 ifeq ($(UNAME), Linux)
@@ -54,8 +54,7 @@ ifeq ($(UNAME), Darwin)
 endif
 
 #LIBS = -l boost_program_options-gcc34 -l pthread -l z
-
-OPTIM_FLAGS = -O3 -fomit-frame-pointer -fno-strict-aliasing #-ffast-math #uncomment for speed, comment for testability
+OPTIM_FLAGS ?= -DNDEBUG -O3 -fomit-frame-pointer -fno-strict-aliasing #-ffast-math #uncomment for speed, comment for testability
 ifeq ($(UNAME), FreeBSD)
   WARN_FLAGS = -Wall
 else
@@ -63,10 +62,10 @@ else
 endif
 
 # for normal fast execution.
-FLAGS = -std=c++0x $(CFLAGS) $(LDFLAGS) $(ARCH) $(WARN_FLAGS) $(OPTIM_FLAGS) -D_FILE_OFFSET_BITS=64 -DNDEBUG $(BOOST_INCLUDE)  -fPIC #-DVW_LDA_NO_SSE
+FLAGS = -std=c++0x $(CFLAGS) $(LDFLAGS) $(ARCH) $(WARN_FLAGS) $(OPTIM_FLAGS) -D_FILE_OFFSET_BITS=64 $(BOOST_INCLUDE)  -fPIC #-DVW_LDA_NO_SSE
 
 # for profiling -- note that it needs to be gcc
-#FLAGS = -std=c++0x $(CFLAGS) $(LDFLAGS) $(ARCH) $(WARN_FLAGS) -O2 -fno-strict-aliasing -ffast-math -D_FILE_OFFSET_BITS=64 $(BOOST_INCLUDE) -pg  -fPIC #-DVW_LDA_NO_S
+#FLAGS = -std=c++0x $(CFLAGS) $(LDFLAGS) $(ARCH) $(WARN_FLAGS) -O2 -fno-strict-aliasing -D_FILE_OFFSET_BITS=64 $(BOOST_INCLUDE) -pg  -fPIC
 #CXX = g++
 
 # for valgrind / gdb debugging
@@ -78,7 +77,9 @@ FLAGS = -std=c++0x $(CFLAGS) $(LDFLAGS) $(ARCH) $(WARN_FLAGS) $(OPTIM_FLAGS) -D_
 BINARIES = vw active_interactor
 MANPAGES = vw.1
 
-all:	vw spanning_tree library_example java
+default:	vw
+
+all:	vw library_example java spanning_tree
 
 %.1:	%
 	help2man --no-info --name="Vowpal Wabbit -- fast online learning tool" ./$< > $@
@@ -91,11 +92,23 @@ spanning_tree:
 vw:
 	cd vowpalwabbit; $(MAKE) -j $(NPROCS) things
 
+#Target-specific flags for a profiling build.  (Copied from line 70)
+vw_gcov: FLAGS = -std=c++0x $(CFLAGS) $(LDFLAGS) $(ARCH) $(WARN_FLAGS) -g -O0 -fprofile-arcs -ftest-coverage -fno-strict-aliasing -D_FILE_OFFSET_BITS=64 $(BOOST_INCLUDE) -pg  -fPIC #-DVW_LDA_NO_S
+vw_gcov: CXX = g++
+vw_gcov:
+	cd vowpalwabbit && env LDFLAGS="-fprofile-arcs -ftest-coverage -lgcov"; $(MAKE) -j $(NPROCS) things
+
 active_interactor:
 	cd vowpalwabbit; $(MAKE)
 
 library_example: vw
-	cd library; $(MAKE) things
+	cd library; $(MAKE) -j $(NPROCS) things
+
+#Target-specific flags for a profiling build.  (Copied from line 70)
+library_example_gcov: FLAGS = -std=c++0x $(CFLAGS) $(LDFLAGS) $(ARCH) $(WARN_FLAGS) -g -O0 -fprofile-arcs -ftest-coverage -fno-strict-aliasing -D_FILE_OFFSET_BITS=64 $(BOOST_INCLUDE) -pg  -fPIC #-DVW_LDA_NO_S
+library_example_gcov: CXX = g++
+library_example_gcov: vw_gcov
+	cd library && env LDFLAGS="-fprofile-arcs -ftest-coverage -lgcov"; $(MAKE) things
 
 python: vw
 	cd python; $(MAKE) things
@@ -111,8 +124,18 @@ test: .FORCE vw library_example
 	@echo "vw running test-suite..."
 	(cd test && ./RunTests -d -fe -E 0.001 ../vowpalwabbit/vw ../vowpalwabbit/vw)
 
+test_gcov: .FORCE vw_gcov library_example_gcov
+	@echo "vw running test-suite..."
+	(cd test && ./RunTests -d -fe -E 0.001 ../vowpalwabbit/vw ../vowpalwabbit/vw)
+
+bigtests:	.FORCE vw
+	(cd big_tests && $(MAKE) $(MAKEFLAGS))
+
 install: $(BINARIES)
 	cd vowpalwabbit; cp $(BINARIES) /usr/local/bin; cd ../cluster; $(MAKE) install
+
+doc:
+	(cd doc && doxygen Doxyfile)
 
 clean:
 	cd vowpalwabbit && $(MAKE) clean
@@ -123,4 +146,4 @@ ifneq ($(JAVA_HOME),)
 	cd java    && $(MAKE) clean
 endif
 
-.PHONY: all clean install
+.PHONY: all clean install doc

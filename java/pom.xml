@@ -4,7 +4,7 @@
 
     <groupId>com.github.johnlangford</groupId>
     <artifactId>vw-jni</artifactId>
-    <version>8.0.1-SNAPSHOT</version>
+    <version>8.1.2-SNAPSHOT</version>
     <packaging>jar</packaging>
     <name>Vowpal Wabbit JNI Layer</name>
     <description>
@@ -52,6 +52,10 @@
             <email>jl@hunch.net</email>
         </developer>
     </developers>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
 
     <dependencies>
         <dependency>
@@ -188,6 +192,19 @@
                     <autoReleaseAfterClose>true</autoReleaseAfterClose>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>2.8.1</version>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
@@ -209,19 +226,6 @@
                         <executions>
                             <execution>
                                 <id>attach-sources</id>
-                                <goals>
-                                    <goal>jar</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-javadoc-plugin</artifactId>
-                        <version>2.8.1</version>
-                        <executions>
-                            <execution>
-                                <id>attach-javadocs</id>
                                 <goals>
                                     <goal>jar</goal>
                                 </goals>
