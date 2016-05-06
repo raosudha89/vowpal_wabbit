@@ -1,0 +1,6 @@
+1	John	NN	2	ARG0	John
+2	loves	VB	0	ROOT	love-01
+3	Kate	NN	2	ARG1	Kate
+4	very	PP	2	MOD	very
+5	much	PP	4	MOD	much
+
