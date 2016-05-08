@@ -2198,6 +2198,8 @@ base_learner* setup(vw&all)
   if (vm.count("search_no_caching"))              priv.no_caching           = true;
   if (vm.count("search_rollout_num_steps"))       priv.rollout_num_steps    = vm["search_rollout_num_steps"].as<size_t>();
 
+  if (vm.count("search_force_oracle"))            priv.force_oracle         = true;
+
   priv.A = vm["search"].as<size_t>();
 
   string neighbor_features_string;
