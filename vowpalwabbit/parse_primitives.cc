@@ -21,6 +21,11 @@ bool substring_equal(substring&a, substring&b)
          && (strncmp(a.begin, b.begin, a.end - a.begin) == 0);
 }
 
+bool substring_equal(substring&a, const char*b)
+{ return (a.end - a.begin == (int)strlen(b)) // same length
+         && (strncmp(a.begin, b, a.end - a.begin) == 0);
+}
+
 void tokenize(char delim, substring s, v_array<substring>& ret, bool allow_empty)
 { ret.erase();
   char *last = s.begin;

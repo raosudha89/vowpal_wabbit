@@ -236,6 +236,9 @@ struct search_private
   BaseTask* metaoverride;
   size_t meta_t;  // the metatask has it's own notion of time. meta_t+t, during a single run, is the way to think about the "real" decision step but this really only matters for caching purposes
   v_array< v_array<action_cache>* > memo_foreach_action; // when foreach_action is on, we need to cache TRAIN trajectory actions for LEARN
+
+  v_array<search_task*>* multitask; // if you're doing MTL, then we keep track of each task individually
+  size_t current_task;
 };
 
 string   audit_feature_space("conditional");
@@ -1760,7 +1763,7 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
 
 
 template <bool is_learn>
-void do_actual_learning(vw&all, search& sch)
+void do_actual_learning_known_task(vw&all, search& sch)
 { search_private& priv = *sch.priv;
 
   if (priv.ec_seq.size() == 0)
@@ -1797,6 +1800,62 @@ void do_actual_learning(vw&all, search& sch)
   if (priv.task->run_takedown) priv.task->run_takedown(sch, priv.ec_seq);
 }
 
+int32_t get_multitask_id(example& ec)
+{ // specify task with an example like "|task :5" meaning task = 5
+  if (ec.indices.size() >  2) return -1; // at most you should have constant namespace and task namespace
+  if (ec.indices.size() == 0) return -1; // need at least one namespace
+  if ((ec.indices[0] != 't') &&
+      ((ec.indices.size() == 1) || (ec.indices[1] != 't'))) return -1;
+  // we have the right namespace, now get the task id
+  features& feats = ec.feature_space['t'];
+  if (feats.values.size() != 1) return -1;
+  int32_t task = (int32_t) feats.values[0];
+  float recovered_float = (float)task;
+  if (fabs(recovered_float - feats.values[0]) > 0.01) return -1;
+  return task;
+}
+
+void set_multitask_id(search_private& priv, int32_t task_id)
+{ priv.task = priv.multitask->get(task_id);
+  priv.current_task = task_id;
+  // TODO: set options appropriately
+}
+
+  
+template <bool is_learn>
+void do_actual_learning(vw&all, search& sch)  // first, might need to figure out which task we're doing!
+{ search_private& priv = *sch.priv;
+
+  if (priv.ec_seq.size() == 0)
+    return;  // nothing to do :)
+
+  if (priv.multitask == nullptr)
+    do_actual_learning_known_task<is_learn>(all, sch);
+  else
+  { // we need to inspect the first example to see which task this is
+    int32_t task_id = get_multitask_id(*priv.ec_seq[0]);
+    if (task_id <= 0)
+    { std::cerr << "warning: malformed task id example at " << priv.ec_seq[0]->example_counter << "; treating as task 1" << std::endl;
+      task_id = 1;
+      assert(false);
+    }
+    if (task_id > priv.multitask->size())
+    { std::cerr << "warning: unknown task id " << task_id << " at " << priv.ec_seq[0]->example_counter << "; ignoring" << std::endl;
+      return;
+    }
+    assert(priv.task == nullptr);
+    set_multitask_id(priv, task_id-1);
+    vector<example*> old_ec_seq;
+    for (example* ec : priv.ec_seq) old_ec_seq.push_back(ec);
+    priv.ec_seq.clear();
+    for (size_t n=1; n<old_ec_seq.size(); n++) priv.ec_seq.push_back(old_ec_seq[n]);
+    do_actual_learning_known_task<is_learn>(all, sch);
+    priv.ec_seq = old_ec_seq;
+    priv.task = nullptr;
+  }
+}
+
+  
 template <bool is_learn>
 void search_predict_or_learn(search& sch, base_learner& base, example& ec)
 { search_private& priv = *sch.priv;
@@ -1895,6 +1954,7 @@ void search_initialize(vw* all, search& sch)
   priv.num_learners = 1;
   priv.state = INITIALIZE;
   priv.mix_per_roll_policy = -2;
+  priv.multitask = nullptr;
 
   priv.pred_string  = new stringstream();
   priv.truth_string = new stringstream();
@@ -1996,7 +2056,13 @@ void search_finish(search& sch)
   priv.learn_condition_on.delete_v();
   priv.learn_condition_on_act.delete_v();
 
-  if (priv.task->finish) priv.task->finish(sch);
+  if (priv.multitask)
+  { for (search_task* task : *priv.multitask)
+      if (task->finish) task->finish(sch);
+    delete priv.multitask;
+  }
+  else if (priv.task->finish) priv.task->finish(sch);
+  
   if (priv.metatask && priv.metatask->finish) priv.metatask->finish(sch);
 
   free(priv.allowed_actions_cache);
@@ -2123,11 +2189,42 @@ void parse_neighbor_features(string& nf_string, search&sch)
   delete[] cstr;
 }
 
+void parse_task_names(search& sch, search_private& priv, string& task_string)
+{
+  substring task_substring = { (char*)task_string.c_str(), 0 };
+  task_substring.end = task_substring.begin + task_string.length();
+  v_array<substring> all_task_names = v_init<substring>();
+  tokenize(',', task_substring, all_task_names);
+  if (all_task_names.size() == 1)
+  { for (search_task** mytask = all_tasks; *mytask != nullptr; ++mytask)
+      if (task_string.compare((*mytask)->task_name) == 0)
+      { priv.task = *mytask;
+        sch.task_name = (*mytask)->task_name;
+        break;
+      }
+  } else
+  { priv.multitask = new v_array<search_task*>();
+    sch.task_name = "multitask";
+    for (substring& ss : all_task_names)
+    { bool found = false;
+      for (search_task** mytask = all_tasks; *mytask != nullptr; ++mytask)
+      { if (substring_equal(ss, (*mytask)->task_name))
+        { priv.multitask->push_back(*mytask);
+          found = true;
+          break;
+        }
+      }
+      if (! found)
+        THROW("fail: unknown task for --search_task '" << ss << "'; use --search_task list to get a list");
+    }
+  }
+}
+  
 base_learner* setup(vw&all)
 { if (missing_option<size_t, false>(all, "search", "Use learning to search, argument=maximum action id or 0 for LDF"))
     return nullptr;
   new_options(all, "Search Options")
-  ("search_task",              po::value<string>(), "the search task (use \"--search_task list\" to get a list of available tasks)")
+  ("search_task",              po::value<string>(), "the search task (use \"--search_task list\" to get a list of available tasks), comma separated for multitask learning")
   ("search_metatask",          po::value<string>(), "the search metatask (use \"--search_metatask list\" to get a list of available metatasks)")
   ("search_interpolation",     po::value<string>(), "at what level should interpolation happen? [*data|policy]")
   ("search_rollout",           po::value<string>(), "how should rollouts be executed?           [policy|oracle|*mix_per_state|mix_per_roll|none]")
@@ -2307,13 +2404,8 @@ base_learner* setup(vw&all)
     std::cerr << endl;
     exit(0);
   }
-  for (search_task** mytask = all_tasks; *mytask != nullptr; mytask++)
-    if (task_string.compare((*mytask)->task_name) == 0)
-    { priv.task = *mytask;
-      sch.task_name = (*mytask)->task_name;
-      break;
-    }
-  if (priv.task == nullptr)
+  parse_task_names(sch, priv, task_string);
+  if ((priv.task == nullptr) && (priv.multitask == nullptr))
   { if (! vm.count("help"))
       THROW("fail: unknown task for --search_task '" << task_string << "'; use --search_task list to get a list");
   }
@@ -2341,6 +2433,10 @@ base_learner* setup(vw&all)
   all.p->lp = MC::mc_label;
   if (priv.task && priv.task->initialize)
     priv.task->initialize(sch, priv.A, vm);
+  if (priv.multitask)
+    for (search_task* task : *priv.multitask)
+      if (task->initialize)
+        task->initialize(sch, priv.A, vm);
   if (priv.metatask && priv.metatask->initialize)
     priv.metatask->initialize(sch, priv.A, vm);
   priv.meta_t = 0;
@@ -2361,10 +2457,12 @@ base_learner* setup(vw&all)
 
   cdbg << "num_learners = " << priv.num_learners << endl;
 
+  size_t num_tasks = priv.multitask ? priv.multitask->size() : 1;
+  
   learner<search>& l = init_learner(&sch, base,
                                     search_predict_or_learn<true>,
                                     search_predict_or_learn<false>,
-                                    priv.total_number_of_policies * priv.num_learners);
+                                    priv.total_number_of_policies * priv.num_learners * num_tasks);
   l.set_finish_example(finish_example);
   l.set_end_examples(end_examples);
   l.set_finish(search_finish);
@@ -2392,6 +2490,8 @@ bool search::is_ldf() { return priv->is_ldf; }
 
 action search::predict(example& ec, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, size_t learner_id, float weight)
 { float a_cost = 0.;
+  if (priv->multitask != nullptr)
+    learner_id = priv->multitask->size() * learner_id + priv->current_task; // TODO don't have size in the inner loop
   action a = search_predict(*priv, &ec, 1, mytag, oracle_actions, oracle_actions_cnt, condition_on, condition_on_names, allowed_actions, allowed_actions_cnt, allowed_actions_cost, learner_id, a_cost, weight);
   if (priv->state == INIT_TEST) priv->test_action_sequence.push_back(a);
   if (mytag != 0)
@@ -2419,6 +2519,8 @@ action search::predict(example& ec, ptag mytag, const action* oracle_actions, si
 
 action search::predictLDF(example* ecs, size_t ec_cnt, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, size_t learner_id, float weight)
 { float a_cost = 0.;
+  if (priv->multitask != nullptr)
+    learner_id = priv->multitask->size() * learner_id + priv->current_task; // TODO don't have size in the inner loop
   // TODO: action costs for ldf
   action a = search_predict(*priv, ecs, ec_cnt, mytag, oracle_actions, oracle_actions_cnt, condition_on, condition_on_names, nullptr, 0, nullptr, learner_id, a_cost, weight);
   if (priv->state == INIT_TEST) priv->test_action_sequence.push_back(a);
@@ -2448,16 +2550,24 @@ stringstream& search::output()
   else                                             return *(this->priv->pred_string);
 }
 
+void set_option_bit(uint32_t opts, uint32_t opt, bool& bit) {
+  if ((opts & opt) != 0) { bit = true; return; }
+  if (bit)
+    THROW("task first turned an option on and then turned it off! this isn't allowed" << endl << "this probably happened because of multitask learning with incompatible tasks" << endl);
+}
+  
 void  search::set_options(uint32_t opts)
 { if (this->priv->all->vw_is_main && (this->priv->state != INITIALIZE))
     std::cerr << "warning: task should not set options except in initialize function!" << endl;
-  if ((opts & AUTO_CONDITION_FEATURES) != 0) this->priv->auto_condition_features = true;
-  if ((opts & AUTO_HAMMING_LOSS)       != 0) this->priv->auto_hamming_loss = true;
-  if ((opts & EXAMPLES_DONT_CHANGE)    != 0) this->priv->examples_dont_change = true;
-  if ((opts & IS_LDF)                  != 0) this->priv->is_ldf = true;
-  if ((opts & NO_CACHING)              != 0) this->priv->no_caching = true;
-  if ((opts & ACTION_COSTS)            != 0) this->priv->use_action_costs = true;
+  set_option_bit(opts, AUTO_CONDITION_FEATURES, this->priv->auto_condition_features);
+  set_option_bit(opts, AUTO_HAMMING_LOSS      , this->priv->auto_hamming_loss);
+  set_option_bit(opts, EXAMPLES_DONT_CHANGE   , this->priv->examples_dont_change);
+  set_option_bit(opts, IS_LDF                 , this->priv->is_ldf);
+  set_option_bit(opts, NO_CACHING             , this->priv->no_caching);
+  set_option_bit(opts, ACTION_COSTS           , this->priv->use_action_costs);
 
+  // TODO: really, each task should maintain it's own options :(
+  
   if (this->priv->is_ldf && this->priv->use_action_costs)
     THROW("using LDF and actions costs is not yet implemented; turn off action costs"); // TODO fix
 
