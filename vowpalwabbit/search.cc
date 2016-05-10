@@ -1348,6 +1348,8 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
   { action a = (action)priv.learn_a_idx;
     priv.loss_declared_cnt = 0;
 
+    setup_learner_id(priv, learner_id);
+    
     cdbg << "LEARN " << t << " = priv.learn_t ==> a=" << a << endl;
 
     priv.learn_a_idx++;
@@ -1415,7 +1417,7 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
         a_cost = priv.memo_foreach_action[t]->get(a).cost;
       }
     }
-
+    cdbg << "a=" << a << ", a_name=" << a_name << endl;
     a = a_name;
 
     if (priv.metaoverride && priv.metaoverride->_post_prediction)
@@ -2562,7 +2564,7 @@ action search::predict(example& ec, ptag mytag, const action* oracle_actions, si
       push_at(priv->ptag_to_action, action_repr(a, &(priv->last_action_repr)), mytag);
     } else
       push_at(priv->ptag_to_action, action_repr(a, (features*)nullptr), mytag);
-    cdbg << "push_at " << mytag << endl;
+    cdbg << "push_at " << mytag << " <- " << a << endl;
   }
   if (priv->auto_hamming_loss)
     loss( priv->use_action_costs
@@ -2587,7 +2589,7 @@ action search::predictLDF(example* ecs, size_t ec_cnt, ptag mytag, const action*
         delete priv->ptag_to_action[mytag].repr;
       }
     } // TODO: passthrough representation
-    cdbg << "push_at " << mytag << endl;
+    cdbg << "push_at " << mytag << " <- " << a << endl;
     push_at(priv->ptag_to_action, action_repr(ecs[a].l.cs.costs[0].class_index, &(priv->last_action_repr)), mytag);
   }
   if (priv->auto_hamming_loss)
