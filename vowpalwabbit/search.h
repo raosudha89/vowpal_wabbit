@@ -178,15 +178,48 @@ struct search
   // pretty print a label
   std::string pretty_label(action a);
 
+  //////////////////////////////////////////////////
+  // some helper functions for LDF mode
+  //////////////////////////////////////////////////
+  // allocate some examples for LDF mode. you don't need to worry
+  // about freeing them later. they will be freed _after_ your
+  // "finish" method has run. if you call this more than once, it will
+  // cause a re-allocation, and all previous pointers will be
+  // invalidated. this will also be very slow. by default the labels
+  // will be i:0. for i starting at ZERO.
+  void ldf_alloc(size_t numExamples);
+
+  // how many ldf examples have been allocated?
+  size_t ldf_count();
+
+  // get the ith ldf example; returns nullptr if i >= ldf_count() if
+  // no argument (equivalent to i=0) then it returns a pointer to the
+  // first ldf example, which can be used as input to
+  // predictor.set_input
+  example* ldf_example(size_t i=0);
+
+  // helper function for adjusting the label on an ldf example
+  void ldf_set_label(size_t i, action a, float cost=0.);
+  action ldf_get_label(size_t i);
+  
+  //////////////////////////////////////////////////
   // for meta-tasks:
+  //////////////////////////////////////////////////
   BaseTask base_task(vector<example*>& ec) { return BaseTask(this, ec); }
 
+  
+  //////////////////////////////////////////////////
   // internal data that you don't get to see!
+  //////////////////////////////////////////////////
   search_private* priv;
   void*           task_data;  // your task data!
   void*           metatask_data;  // your metatask data!
   const char*     task_name;
   const char*     metatask_name;
+
+  // data for ldf examples
+  example* alloced_ldf_examples;
+  size_t   alloced_ldf_examples_count;
 
   vw& get_vw_pointer_unsafe();   // although you should rarely need this, some times you need a poiter to the vw data structure :(
   void set_force_oracle(bool force);  // if the library wants to force search to use the oracle, set this to true

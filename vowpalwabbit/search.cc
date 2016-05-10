@@ -2122,6 +2122,14 @@ void search_finish(search& sch)
   
   if (priv.metatask && priv.metatask->finish) priv.metatask->finish(sch);
 
+  if (priv.learner_is_ldf != nullptr)
+    delete priv.learner_is_ldf;
+  
+  if (sch.alloced_ldf_examples)
+  { sch.ldf_alloc(0);
+    free(sch.alloced_ldf_examples);
+  }
+
   free(priv.allowed_actions_cache);
   delete priv.rawOutputStringStream;
   free (sch.priv);
@@ -2275,6 +2283,7 @@ void parse_task_names(search& sch, search_private& priv, string& task_string)
         THROW("fail: unknown task for --search_task '" << ss << "'; use --search_task list to get a list");
     }
   }
+  all_task_names.delete_v();
 }
   
 base_learner* setup(vw&all)
@@ -2686,7 +2695,80 @@ string search::pretty_label(action a)
     return os.str();
   }
 }
+  
+void search::ldf_alloc(size_t numExamples)
+{ if (alloced_ldf_examples == nullptr)
+  { alloced_ldf_examples = VW::alloc_examples(sizeof(CS::label), numExamples);
+    alloced_ldf_examples_count = numExamples;
+    for (size_t a=0; a<numExamples; a++)
+    { CS::label& lab = alloced_ldf_examples[a].l.cs;
+      CS::cs_label.default_label(&lab);
+      CS::wclass wclass = { 0., (uint32_t)a, 0., 0. };
+      lab.costs.push_back(wclass);
+    }
+    return;
+  }
+  // otherwise, already alloced
+  if (numExamples == alloced_ldf_examples_count) return;  // phew!
+  if (numExamples <  alloced_ldf_examples_count)
+  { for (size_t a=numExamples; a<alloced_ldf_examples_count; a++)
+      VW::dealloc_example(CS::cs_label.delete_label, alloced_ldf_examples[a]);
+    alloced_ldf_examples_count = numExamples;
+    return;
+  }
+  // finally, we want MORE examples!
+  example* old_ex = alloced_ldf_examples;
+  size_t   old_cnt = alloced_ldf_examples_count;
+  alloced_ldf_examples = VW::alloc_examples(sizeof(CS::label), numExamples);
+  alloced_ldf_examples_count = numExamples;
+  for (size_t a=0; a<old_cnt; a++)
+  { VW::copy_example_data(false, alloced_ldf_examples+a, old_ex+a);
+    CS::label& lab = alloced_ldf_examples[a].l.cs;
+    CS::cs_label.default_label(&lab);
+    CS::cs_label.copy_label(&lab, &old_ex[a].l.cs);
+  }
+  for (size_t a=old_cnt; a<numExamples; a++)
+  { CS::label& lab = alloced_ldf_examples[a].l.cs;
+    CS::cs_label.default_label(&lab);
+    CS::wclass wclass = { 0., (uint32_t)a, 0., 0. };
+    lab.costs.push_back(wclass);
+  }
+  for (size_t a=0; a<old_cnt; a++)
+    VW::dealloc_example(CS::cs_label.delete_label, old_ex[a]);
+}
 
+size_t search::ldf_count() { return alloced_ldf_examples_count; }
+  
+example* search::ldf_example(size_t i)
+{ if (i >= alloced_ldf_examples_count) return nullptr;
+  return &(alloced_ldf_examples[i]);
+}
+
+void search::ldf_set_label(size_t i, action a, float cost)
+{ if (i >= alloced_ldf_examples_count)
+    THROW("search::ldf_set_label on example greater than count");
+  CS::label& lab = alloced_ldf_examples[i].l.cs;
+  if (lab.costs.size() == 0) {
+    CS::wclass wclass = { cost, a, 0., 0. };
+    lab.costs.push_back(wclass);
+  }
+  else
+  { lab.costs[0].x = 0.;
+    lab.costs[0].class_index = (uint64_t)a+1;
+    lab.costs[0].partial_prediction = 0.;
+    lab.costs[0].wap_value = 0.;
+  }
+}
+
+action search::ldf_get_label(size_t i)
+{ if (i >= alloced_ldf_examples_count)
+    THROW("search::ldf_get_label on example greater than count");
+  CS::label& lab = alloced_ldf_examples[i].l.cs;
+  if (lab.costs.size() == 0)
+    THROW("search::ldf_get_label costs.size == 0");
+  return lab.costs[0].class_index;
+}
+  
 vw& search::get_vw_pointer_unsafe() { return *this->priv->all; }
 void search::set_force_oracle(bool force) { this->priv->force_oracle = force; }
 

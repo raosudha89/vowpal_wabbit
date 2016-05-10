@@ -6,11 +6,11 @@ license as described in the file LICENSE.
 #include "search_sequencetask.h"
 #include "vw.h"
 
-namespace SequenceTask         { Search::search_task task = { "sequence",          run, initialize, nullptr,   nullptr,  nullptr     }; }
-namespace SequenceSpanTask     { Search::search_task task = { "sequencespan",      run, initialize, finish, setup, takedown }; }
-namespace SequenceTaskCostToGo { Search::search_task task = { "sequence_ctg",      run, initialize, nullptr,   nullptr,  nullptr     }; }
+namespace SequenceTask         { Search::search_task task = { "sequence",          run, initialize, nullptr,  nullptr,  nullptr     }; }
+namespace SequenceSpanTask     { Search::search_task task = { "sequencespan",      run, initialize, finish,   setup,    takedown    }; }
+namespace SequenceTaskCostToGo { Search::search_task task = { "sequence_ctg",      run, initialize, nullptr,  nullptr,  nullptr     }; }
 namespace ArgmaxTask           { Search::search_task task = { "argmax",            run, initialize, finish,   nullptr,  nullptr     }; }
-namespace SequenceTask_DemoLDF { Search::search_task task = { "sequence_demoldf",  run, initialize, finish, nullptr,  nullptr     }; }
+namespace SequenceTask_DemoLDF { Search::search_task task = { "sequence_demoldf",  run, initialize, nullptr,  nullptr,  nullptr     }; }
 
 namespace SequenceTask
 {
@@ -305,39 +305,13 @@ void run(Search::search& sch, vector<example*>& ec)
 namespace SequenceTask_DemoLDF    // this is just to debug/show off how to do LDF
 {
 namespace CS=COST_SENSITIVE;
-struct task_data
-{ example* ldf_examples;
-  size_t   num_actions;
-};
 
 void initialize(Search::search& sch, size_t& num_actions, po::variables_map& /*vm*/)
-{ CS::wclass default_wclass = { 0., 0, 0., 0. };
-
-  example* ldf_examples = VW::alloc_examples(sizeof(CS::label), num_actions);
-  for (size_t a=0; a<num_actions; a++)
-  { CS::label& lab = ldf_examples[a].l.cs;
-    CS::cs_label.default_label(&lab);
-    lab.costs.push_back(default_wclass);
-  }
-
-  task_data* data = &calloc_or_throw<task_data>();
-  data->ldf_examples = ldf_examples;
-  data->num_actions  = num_actions;
-
-  sch.set_task_data<task_data>(data);
+{ sch.ldf_alloc(num_actions);
   sch.set_options( Search::AUTO_CONDITION_FEATURES |    // automatically add history features to our examples, please
                    Search::AUTO_HAMMING_LOSS       |    // please just use hamming loss on individual predictions -- we won't declare loss
                    Search::IS_LDF                  );   // we generate ldf examples
 }
-
-void finish(Search::search& sch)
-{ task_data *data = sch.get_task_data<task_data>();
-  for (size_t a=0; a<data->num_actions; a++)
-    VW::dealloc_example(CS::cs_label.delete_label, data->ldf_examples[a]);
-  free(data->ldf_examples);
-  free(data);
-}
-
 
 // this is totally bogus for the example -- you'd never actually do this!
 void my_update_example_indicies(Search::search& sch, bool audit, example* ec, uint64_t mult_amount, uint64_t plus_amount)
@@ -348,28 +322,22 @@ void my_update_example_indicies(Search::search& sch, bool audit, example* ec, ui
 }
 
 void run(Search::search& sch, vector<example*>& ec)
-{ task_data *data = sch.get_task_data<task_data>();
+{ action num_actions = sch.ldf_count();
   Search::predictor P(sch, (ptag)0);
   for (ptag i=0; i<ec.size(); i++)
-  { for (size_t a=0; a<data->num_actions; a++)
+  { for (size_t a=0; a<num_actions; a++)
     { if (sch.predictNeedsExample())   // we can skip this work if `predict` won't actually use the example data
-      { VW::copy_example_data(false, &data->ldf_examples[a], ec[i]);  // copy but leave label alone!
+      { VW::copy_example_data(false, sch.ldf_example(a), ec[i]);  // copy but leave label alone!
         // now, offset it appropriately for the action id
-        my_update_example_indicies(sch, true, &data->ldf_examples[a], 28904713, 4832917 * (uint64_t)a);
+        my_update_example_indicies(sch, true, sch.ldf_example(a), 28904713, 4832917 * (uint64_t)a);
       }
-
       // regardless of whether the example is needed or not, the class info is needed
-      CS::label& lab = data->ldf_examples[a].l.cs;
-      // need to tell search what the action id is, so that it can add history features correctly!
-      lab.costs[0].x = 0.;
-      lab.costs[0].class_index = (uint64_t)a+1;
-      lab.costs[0].partial_prediction = 0.;
-      lab.costs[0].wap_value = 0.;
+      sch.ldf_set_label(a, a+1, 0.);
     }
 
     action oracle  = ec[i]->l.multi.label - 1;
-    action pred_id = P.set_tag((ptag)(i+1)).set_input(data->ldf_examples, data->num_actions).set_oracle(oracle).set_condition_range(i, sch.get_history_length(), 'p').predict();
-    action prediction = pred_id + 1;  // or ldf_examples[pred_id]->ld.costs[0].weight_index
+    action pred_id = P.set_tag((ptag)(i+1)).set_input(sch.ldf_example(), num_actions).set_oracle(oracle).set_condition_range(i, sch.get_history_length(), 'p').predict();
+    action prediction = pred_id + 1;  // or sch.ldf_get_label(pred_id)
 
     if (sch.output().good())
       sch.output() << prediction << ' ';
