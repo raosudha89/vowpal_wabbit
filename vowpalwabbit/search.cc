@@ -1145,7 +1145,7 @@ void setup_learner_id(search_private& priv, size_t learner_id)
   if (priv.learner_is_ldf != nullptr) { cdbg << "learner_is_ldf = ["; for (bool b : *priv.learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl; } 
   if (priv.is_mixed_ldf && (priv.learner_is_ldf != nullptr))
   { if (priv.learn_learner_id >= priv.learner_is_ldf->size())
-      THROW("generate_training_example learner id " << priv.learn_learner_id << " when there are only " << priv.learner_is_ldf->size() << " learners");
+      THROW("setup_learner_id learner id " << priv.learn_learner_id << " when there are only " << priv.learner_is_ldf->size() << " learners");
     priv.is_ldf = (*priv.learner_is_ldf)[learner_id];
     cdbg << "setup_learner_id just set is_ldf=" << priv.is_ldf << " for learner_id=" << learner_id << endl;
   }
@@ -1165,7 +1165,7 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
       for (size_t i=0; i<losses.cs.costs.size(); i++) min_loss = MIN(min_loss, losses.cs.costs[i].x);
     for (size_t i=0; i<losses.cs.costs.size(); i++) losses.cs.costs[i].x = (losses.cs.costs[i].x - min_loss) * weight;
   }
-  //cdbg << "losses = ["; for (size_t i=0; i<losses.cs.costs.size(); i++) cdbg << ' ' << losses.cs.costs[i].class_index << ':' << losses.cs.costs[i].x; cdbg << " ], min_loss=" << min_loss << endl;
+  cdbg << "losses = ["; for (size_t i=0; i<losses.cs.costs.size(); i++) cdbg << ' ' << losses.cs.costs[i].class_index << ':' << losses.cs.costs[i].x; cdbg << " ], min_loss=" << min_loss << endl;
 
   priv.total_example_t += 1.;   // TODO: should be max-min
 
@@ -1403,6 +1403,8 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
       { ensure_size(priv.learn_allowed_actions, allowed_actions_cnt);
         memcpy(priv.learn_allowed_actions.begin(), allowed_actions, allowed_actions_cnt*sizeof(action));
         cdbg_print_array("in LEARN, learn_allowed_actions", priv.learn_allowed_actions);
+      } else {
+        priv.learn_allowed_actions.end() = priv.learn_allowed_actions.begin();
       }
     }
 
@@ -1520,6 +1522,8 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
           if (allowed_actions)
           { ensure_size(priv.learn_allowed_actions, allowed_actions_cnt); // TODO: do we really need this?
             memcpy(priv.learn_allowed_actions.begin(), allowed_actions, allowed_actions_cnt * sizeof(action));
+          } else {
+            priv.learn_allowed_actions.end() = priv.learn_allowed_actions.begin(); // TODO remove this???
           }
           
           generate_training_example(priv, priv.gte_label, 1., false);  // this is false because the conditioning has already been added!
@@ -1794,11 +1798,14 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
     }
     // now we can make a training example
     setup_learner_id(priv, priv.learn_learner_id);
-    
+    cdbg << "priv.learn_allowed_actions.size = " << priv.learn_allowed_actions.size() << endl;
     if (priv.learn_allowed_actions.size() > 0)
     { for (size_t i=0; i<priv.learn_allowed_actions.size(); i++)
-      { priv.learn_losses.cs.costs[i].class_index = priv.learn_allowed_actions[i];
-      }
+        priv.learn_losses.cs.costs[i].class_index = priv.learn_allowed_actions[i];
+    } else if (priv.multitask)
+    { for (size_t i=0; i<priv.learn_losses.cs.costs.size(); i++)
+        priv.learn_losses.cs.costs[i].class_index = i+1;
+      cdbg << "updated class_index for costs" << endl;
     }
     //float min_loss = 0.;
     //if (priv.metatask)
@@ -2116,6 +2123,7 @@ void search_finish(search& sch)
   if (priv.multitask)
   { for (search_task* task : *priv.multitask)
       if (task->finish) task->finish(sch);
+    priv.multitask->delete_v();
     delete priv.multitask;
   }
   else if (priv.task->finish) priv.task->finish(sch);
