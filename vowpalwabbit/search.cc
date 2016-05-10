@@ -16,6 +16,7 @@ license as described in the file LICENSE.
 #include "search_entityrelationtask.h"
 #include "search_hooktask.h"
 #include "search_graph.h"
+#include "search_test_ldfnonldf.h"
 #include "search_meta.h"
 #include "csoaa.h"
 #include "active.h"
@@ -43,6 +44,7 @@ search_task* all_tasks[] =
   &EntityRelationTask::task,
   &HookTask::task,
   &GraphTask::task,
+  &TestLDFNonLDFTask::task,
   nullptr
 };   // must nullptr terminate!
 
@@ -59,7 +61,7 @@ const bool PRINT_CLOCK_TIME =0;
 string   neighbor_feature_space("neighbor");
 string   condition_feature_space("search_condition");
 
-uint32_t AUTO_CONDITION_FEATURES = 1, AUTO_HAMMING_LOSS = 2, EXAMPLES_DONT_CHANGE = 4, IS_LDF = 8, NO_CACHING = 16, ACTION_COSTS = 32;
+uint32_t AUTO_CONDITION_FEATURES = 1, AUTO_HAMMING_LOSS = 2, EXAMPLES_DONT_CHANGE = 4, IS_LDF = 8, NO_CACHING = 16, ACTION_COSTS = 32, IS_MIXED_LDF = 64;
 enum SearchState { INITIALIZE, INIT_TEST, INIT_TRAIN, LEARN, GET_TRUTH_STRING };
 enum RollMethod { POLICY, ORACLE, MIX_PER_STATE, MIX_PER_ROLL, NO_ROLLOUT };
 
@@ -119,7 +121,8 @@ struct search_private
   bool auto_condition_features;  // do you want us to automatically add conditioning features?
   bool auto_hamming_loss;        // if you're just optimizing hamming loss, we can do it for you!
   bool examples_dont_change;     // set to true if you don't do any internal example munging
-  bool is_ldf;                   // user declared ldf
+  bool is_ldf;                   // user task declared ldf (only)
+  bool is_mixed_ldf;             // user task declared mixed ldf (must be used with multiple learners)
   bool use_action_costs;         // task promises to define per-action rollout-by-ref costs
 
   v_array<int32_t> neighbor_features; // ugly encoding of neighbor feature requirements
@@ -239,6 +242,7 @@ struct search_private
 
   v_array<search_task*>* multitask; // if you're doing MTL, then we keep track of each task individually
   size_t current_task;
+  vector<bool>* learner_is_ldf;
 };
 
 string   audit_feature_space("conditional");
@@ -441,7 +445,7 @@ void print_update(search_private& priv)
 
   if (PRINT_CLOCK_TIME)
     { size_t num_sec = (size_t)(((float)(clock() - priv.start_clock_time)) / CLOCKS_PER_SEC);
-      cerr <<" "<< num_sec << "sec";
+      std::cerr <<" "<< num_sec << "sec";
     }
 
   if (use_heldout_loss)
@@ -765,6 +769,7 @@ polylabel& allowed_actions_to_ld(search_private& priv, size_t ec_cnt, const acti
 
 void allowed_actions_to_label(search_private& priv, size_t ec_cnt, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, const action* oracle_actions, size_t oracle_actions_cnt, polylabel& lab)
 { bool isCB = priv.cb_learner;
+  cdbg << "allowed_actions_to_label priv.is_ldf=" << priv.is_ldf << endl;
   if (priv.is_ldf)   // LDF version easier
   { cs_costs_erase(isCB, lab);
     for (action k=0; k<ec_cnt; k++)
@@ -790,7 +795,8 @@ void allowed_actions_to_label(search_private& priv, size_t ec_cnt, const action*
   }
   else     // non-LDF, no action costs
   { if ((allowed_actions == nullptr) || (allowed_actions_cnt == 0))   // any action is allowed
-    { bool set_to_one = false;
+    { if (priv.is_mixed_ldf) cs_costs_erase(isCB, lab);
+      bool set_to_one = false;
       if (cs_get_costs_size(isCB, lab) != priv.A)
       { cs_costs_erase(isCB, lab);
         for (action k=0; k<priv.A; k++)
@@ -907,6 +913,8 @@ action single_prediction_notLDF(search_private& priv, example& ec, int policy, c
   else
     ec.l.cs = priv.empty_cs_label;
 
+  if (priv.is_mixed_ldf) ec.skip_reduction_layer = 1;
+  
   cdbg << "allowed_actions_cnt=" << allowed_actions_cnt << ", ec.l = ["; for (size_t i=0; i<ec.l.cs.costs.size(); i++) cdbg << ' ' << ec.l.cs.costs[i].class_index << ':' << ec.l.cs.costs[i].x; cdbg << " ]" << endl;
 
   priv.base_learner->predict(ec, policy);
@@ -1004,9 +1012,11 @@ action single_prediction_LDF(search_private& priv, example* ecs, size_t ec_cnt, 
 
     polylabel old_label = ecs[a].l;
     ecs[a].l.cs = priv.ldf_test_label;
+    if (priv.is_mixed_ldf) ecs[a].skip_reduction_layer = 2;
     priv.base_learner->predict(ecs[a], policy);
 
     priv.empty_example->in_use = true;
+    if (priv.is_mixed_ldf) priv.empty_example->skip_reduction_layer = 2;
     priv.base_learner->predict(*priv.empty_example);
 
     cdbg << "partial_prediction[" << a << "] = " << ecs[a].partial_prediction << endl;
@@ -1130,6 +1140,18 @@ bool cached_action_store_or_find(search_private& priv, ptag mytag, const ptag* c
   }
 }
 
+void setup_learner_id(search_private& priv, size_t learner_id)
+{ 
+  if (priv.learner_is_ldf != nullptr) { cdbg << "learner_is_ldf = ["; for (bool b : *priv.learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl; } 
+  if (priv.is_mixed_ldf && (priv.learner_is_ldf != nullptr))
+  { if (priv.learn_learner_id >= priv.learner_is_ldf->size())
+      THROW("generate_training_example learner id " << priv.learn_learner_id << " when there are only " << priv.learner_is_ldf->size() << " learners");
+    priv.is_ldf = (*priv.learner_is_ldf)[learner_id];
+    cdbg << "setup_learner_id just set is_ldf=" << priv.is_ldf << " for learner_id=" << learner_id << endl;
+  }
+  else cdbg << "setup_learner_id skipped learner_id=" << learner_id << endl;
+}
+  
 void generate_training_example(search_private& priv, polylabel& losses, float weight, bool add_conditioning=true, float min_loss=FLT_MAX)    // min_loss = FLT_MAX means "please compute it for me as the actual min"; any other value means to use this
 { // should we really subtract out min-loss?
   //float min_loss = FLT_MAX;
@@ -1147,6 +1169,14 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
 
   priv.total_example_t += 1.;   // TODO: should be max-min
 
+  int32_t skip_reduction_layer = 0;
+  if (priv.is_mixed_ldf && (priv.learner_is_ldf != nullptr))
+  { if (priv.learn_learner_id >= priv.learner_is_ldf->size())
+      THROW("generate_training_example learner id " << priv.learn_learner_id << " when there are only " << priv.learner_is_ldf->size() << " learners");
+    priv.is_ldf = (*priv.learner_is_ldf)[priv.learn_learner_id];
+    skip_reduction_layer = priv.is_ldf ? 2 : 1;
+  }
+  
   if (!priv.is_ldf)     // not LDF
   { // since we're not LDF, it should be the case that ec_ref_cnt == 1
     // and learn_ec_ref[0] is a pointer to a single example
@@ -1154,6 +1184,9 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
     assert(priv.learn_ec_ref != nullptr);
 
     example& ec = priv.learn_ec_ref[0];
+    int32_t old_skip_reduction_layer = ec.skip_reduction_layer;
+    ec.skip_reduction_layer = skip_reduction_layer;
+    
     float old_example_t = ec.example_t;
     ec.example_t = priv.total_example_t;
     polylabel old_label = ec.l;
@@ -1167,6 +1200,7 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
     if (add_conditioning) del_example_conditioning(priv, ec);
     ec.l = old_label;
     ec.example_t = old_example_t;
+    ec.skip_reduction_layer = old_skip_reduction_layer;
     priv.total_examples_generated++;
   }
   else                  // is  LDF
@@ -1183,9 +1217,11 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
     for (size_t is_local=0; is_local<= (size_t)priv.xv; is_local++)
     { int learner = select_learner(priv, priv.current_policy, priv.learn_learner_id, true, is_local > 0);
 
+      int32_t old_skip_reduction_layer = priv.learn_ec_ref[0].skip_reduction_layer;
       for (action a= (uint32_t)start_K; a<priv.learn_ec_ref_cnt; a++)
       { example& ec = priv.learn_ec_ref[a];
         float old_example_t = ec.example_t;
+        ec.skip_reduction_layer = skip_reduction_layer;
         ec.example_t = priv.total_example_t;
 
         CS::label& lab = ec.l.cs;
@@ -1198,13 +1234,21 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
         ec.in_use = true;
         priv.base_learner->learn(ec, learner);
 
-        cdbg << "generate_training_example called learn on action a=" << a << ", costs.size=" << lab.costs.size() << " ec=" << &ec << endl;
+        cdbg << "generate_training_example called learn on action a=" << a << ", costs.size=" << lab.costs.size() << ", costs[0]=" << lab.costs[0].x << ", ec=" << &ec << endl;
         ec.example_t = old_example_t;
         priv.total_examples_generated++;
       }
 
+      priv.empty_example->skip_reduction_layer = skip_reduction_layer;
       priv.base_learner->learn(*priv.empty_example, learner);
+      priv.empty_example->skip_reduction_layer = old_skip_reduction_layer;
       cdbg << "generate_training_example called learn on empty_example" << endl;
+
+      for (action a= (uint32_t)start_K; a<priv.learn_ec_ref_cnt; a++)
+      { example& ec = priv.learn_ec_ref[a];
+        ec.skip_reduction_layer = old_skip_reduction_layer;
+      }
+      
     }
 
     if (add_conditioning)
@@ -1420,6 +1464,7 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
     if ((policy >= 0) || gte_here || need_fea)   // the last case is we need to do foreach action
     { int learner = select_learner(priv, policy, learner_id, false, priv.state != INIT_TEST);
 
+      setup_learner_id(priv, learner_id);
       ensure_size(priv.condition_on_actions, condition_on_cnt);
       for (size_t i=0; i<condition_on_cnt; i++)
         priv.condition_on_actions[i] = ((1 <= condition_on[i]) && (condition_on[i] < priv.ptag_to_action.size())) ? priv.ptag_to_action[condition_on[i]] : 0;
@@ -1427,9 +1472,10 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
       bool not_test = priv.all->training && !ecs[0].test_only;
 
       if ((!skip) && (!need_fea) && not_test && cached_action_store_or_find(priv, mytag, condition_on, condition_on_names, priv.condition_on_actions.begin(), condition_on_cnt, policy, learner_id, a, false, a_cost))
+      { cdbg << "cache returned " << a << endl;
         // if this succeeded, 'a' has the right action
         priv.total_cache_hits++;
-      else   // we need to predict, and then cache, and maybe run foreach_action
+      } else   // we need to predict, and then cache, and maybe run foreach_action
       { size_t start_K = (priv.is_ldf && COST_SENSITIVE::ec_is_example_header(ecs[0])) ? 1 : 0;
         priv.last_action_repr.erase();
         if (priv.auto_condition_features)
@@ -1442,6 +1488,7 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
             if (ecs[0].passthrough) { std::cerr << "search cannot passthrough" << endl; throw exception(); }
             ecs[0].passthrough = &priv.last_action_repr;
           }
+          cdbg << "calling single_prediction_LDF or single_prediction_notLDF based on is_ldf=" << priv.is_ldf << endl;
           a = priv.is_ldf ? single_prediction_LDF(priv, ecs, ec_cnt, learner, a_cost, need_fea ? a : (action)-1)
                 : single_prediction_notLDF(priv, *ecs, learner, allowed_actions, allowed_actions_cnt, allowed_actions_cost, a_cost, need_fea ? a : (action)-1);
 
@@ -1459,17 +1506,20 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
         { cdbg << "INIT_TRAIN, NO_ROLLOUT, at least one oracle_actions, a=" << a << endl;
           // we can generate a training example _NOW_ because we're not doing rollouts
           //allowed_actions_to_losses(priv, ec_cnt, allowed_actions, allowed_actions_cnt, oracle_actions, oracle_actions_cnt, losses);
+          size_t old_learner_id = priv.learn_learner_id;
+          priv.learn_learner_id = learner_id;
+          
+          setup_learner_id(priv, priv.learn_learner_id);
           allowed_actions_to_label(priv, ec_cnt, allowed_actions, allowed_actions_cnt, allowed_actions_cost, oracle_actions, oracle_actions_cnt, priv.gte_label);
           cdbg << "priv.gte_label = ["; for (size_t i=0; i<priv.gte_label.cs.costs.size(); i++) cdbg << ' ' << priv.gte_label.cs.costs[i].class_index << ':' << priv.gte_label.cs.costs[i].x; cdbg << " ]" << endl;
-
+          
           priv.learn_ec_ref = ecs;
           priv.learn_ec_ref_cnt = ec_cnt;
           if (allowed_actions)
           { ensure_size(priv.learn_allowed_actions, allowed_actions_cnt); // TODO: do we really need this?
             memcpy(priv.learn_allowed_actions.begin(), allowed_actions, allowed_actions_cnt * sizeof(action));
           }
-          size_t old_learner_id = priv.learn_learner_id;
-          priv.learn_learner_id = learner_id;
+          
           generate_training_example(priv, priv.gte_label, 1., false);  // this is false because the conditioning has already been added!
           priv.learn_learner_id = old_learner_id;
         }
@@ -1741,6 +1791,8 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
       //                           priv.learn_loss);
     }
     // now we can make a training example
+    setup_learner_id(priv, priv.learn_learner_id);
+    
     if (priv.learn_allowed_actions.size() > 0)
     { for (size_t i=0; i<priv.learn_allowed_actions.size(); i++)
       { priv.learn_losses.cs.costs[i].class_index = priv.learn_allowed_actions[i];
@@ -1990,6 +2042,9 @@ void search_initialize(vw* all, search& sch)
   priv.empty_example->in_use = true;
   CS::cs_label.default_label(&priv.empty_cs_label);
 
+  priv.current_task = 0;
+  priv.learner_is_ldf = nullptr;
+  
   new (&priv.rawOutputString) string();
   priv.rawOutputStringStream = new stringstream(priv.rawOutputString);
   new (&priv.ec_seq) vector<example*>();
@@ -2421,7 +2476,7 @@ base_learner* setup(vw&all)
   if (count(all.args.begin(), all.args.end(),"--csoaa") == 0
       && count(all.args.begin(), all.args.end(),"--csoaa_ldf") == 0
       && count(all.args.begin(), all.args.end(),"--wap_ldf") == 0
-      &&  count(all.args.begin(), all.args.end(),"--cb") == 0)
+      && count(all.args.begin(), all.args.end(),"--cb") == 0)
   { all.args.push_back("--csoaa");
     stringstream ss;
     ss << vm["search"].as<size_t>();
@@ -2531,12 +2586,13 @@ action search::predictLDF(example* ecs, size_t ec_cnt, ptag mytag, const action*
       { priv->ptag_to_action[mytag].repr->delete_v();
         delete priv->ptag_to_action[mytag].repr;
       }
-    }
+    } // TODO: passthrough representation
+    cdbg << "push_at " << mytag << endl;
     push_at(priv->ptag_to_action, action_repr(ecs[a].l.cs.costs[0].class_index, &(priv->last_action_repr)), mytag);
   }
   if (priv->auto_hamming_loss)
     loss(action_hamming_loss(a, oracle_actions, oracle_actions_cnt)); // TODO: action costs
-  cdbg << "predict returning " << a << endl;
+  cdbg << "predictLDF returning " << a << endl;
   return a;
 }
 
@@ -2550,10 +2606,10 @@ stringstream& search::output()
   else                                             return *(this->priv->pred_string);
 }
 
-void set_option_bit(uint32_t opts, uint32_t opt, bool& bit) {
+void set_option_bit(uint32_t opts, uint32_t opt, bool& bit, bool okay_to_reset=false) {
   if ((opts & opt) != 0) { bit = true; return; }
-  if (bit)
-    THROW("task first turned an option on and then turned it off! this isn't allowed" << endl << "this probably happened because of multitask learning with incompatible tasks" << endl);
+  if (bit && !okay_to_reset)
+    THROW("task first turned an option on (" << opt << ") and then turned it off! this isn't allowed" << endl << "this probably happened because of multitask learning with incompatible tasks" << endl);
 }
   
 void  search::set_options(uint32_t opts)
@@ -2563,16 +2619,22 @@ void  search::set_options(uint32_t opts)
   set_option_bit(opts, AUTO_HAMMING_LOSS      , this->priv->auto_hamming_loss);
   set_option_bit(opts, EXAMPLES_DONT_CHANGE   , this->priv->examples_dont_change);
   set_option_bit(opts, IS_LDF                 , this->priv->is_ldf);
-  set_option_bit(opts, NO_CACHING             , this->priv->no_caching);
+  set_option_bit(opts, IS_MIXED_LDF           , this->priv->is_mixed_ldf);
+  set_option_bit(opts, NO_CACHING             , this->priv->no_caching, true);
   set_option_bit(opts, ACTION_COSTS           , this->priv->use_action_costs);
 
+  if (this->priv->is_ldf && this->priv->is_mixed_ldf)
+  { std::cerr << "warning: task is declaring both IS_LDF and IS_MIXED_LDF; assuming IS_MIXED_LDF only" << endl;
+    this->priv->is_ldf = false;
+  }
+  
   // TODO: really, each task should maintain it's own options :(
   
   if (this->priv->is_ldf && this->priv->use_action_costs)
     THROW("using LDF and actions costs is not yet implemented; turn off action costs"); // TODO fix
 
   if (this->priv->use_action_costs && (this->priv->rollout_method != NO_ROLLOUT))
-    cerr << "warning: task is designed to use rollout costs, but this only works when --search_rollout none is specified" << endl;
+    std::cerr << "warning: task is designed to use rollout costs, but this only works when --search_rollout none is specified" << endl;
 }
 
 void search::set_label_parser(label_parser&lp, bool (*is_test)(polylabel&))
@@ -2589,7 +2651,22 @@ void search::get_test_action_sequence(vector<action>& V)
 }
 
 
-void search::set_num_learners(size_t num_learners) { this->priv->num_learners = num_learners; }
+void search::set_num_learners(size_t num_learners)
+{ this->priv->num_learners = num_learners;
+  if (this->priv->learner_is_ldf != nullptr)
+  { delete this->priv->learner_is_ldf;
+    this->priv->learner_is_ldf = nullptr;
+  }
+}
+void search::set_num_learners(vector<bool>& learner_is_ldf)
+{ this->priv->num_learners = learner_is_ldf.size();
+  if (this->priv->learner_is_ldf != nullptr) delete this->priv->learner_is_ldf;
+  this->priv->learner_is_ldf = new vector<bool>(); // TODO: check consistency in mixed_ldf and learner_is_ldf
+  for (bool b : learner_is_ldf)
+    this->priv->learner_is_ldf->push_back(b);
+  cdbg << "learner_is_ldf = ["; for (bool b : *this->priv->learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl;
+}
+
 void search::add_program_options(po::variables_map& /*vw*/, po::options_description& opts) { add_options( *this->priv->all, opts ); }
 
 uint64_t search::get_mask() { return this->priv->all->reg.weight_mask;}
@@ -2826,7 +2903,16 @@ predictor& predictor::add_condition_range(ptag hi, ptag count, char name0)
 }
 predictor& predictor::set_condition_range(ptag hi, ptag count, char name0) { condition_on_tags.erase(); condition_on_names.erase(); return add_condition_range(hi, count, name0); }
 
-predictor& predictor::set_learner_id(size_t id) { learner_id = id; return *this; }
+predictor& predictor::set_learner_id(size_t id)
+{ learner_id = id;
+  if (this->sch.priv->is_mixed_ldf && (this->sch.priv->learner_is_ldf != nullptr))
+  { if (id >= this->sch.priv->learner_is_ldf->size())
+      THROW("set_learner_id " << id << " when there are only " << this->sch.priv->learner_is_ldf->size() << " learners");
+    this->is_ldf = (*this->sch.priv->learner_is_ldf)[id];
+    this->skip_reduction_layer = this->is_ldf ? 2 : 1;
+  }
+  return *this;
+}
 
 predictor& predictor::set_tag(ptag tag) { my_tag = tag; return *this; }
 
@@ -2841,9 +2927,15 @@ action predictor::predict()
   const action* alA      = (allowed_actions.size() == 0) ? nullptr : allowed_actions.begin();
   const float*  alAcosts = (allowed_actions_cost.size() == 0) ? nullptr : allowed_actions_cost.begin();
   size_t numAlA = max(allowed_actions.size(), allowed_actions_cost.size());
+  if (this->sch.priv->is_mixed_ldf)
+    for (size_t i = 0; i < ec_cnt; i++)
+      ec[i].skip_reduction_layer = skip_reduction_layer;
   action p = is_ldf
              ? sch.predictLDF(ec, ec_cnt, my_tag, orA, oracle_actions.size(), cOn, cNa, learner_id, weight)
              : sch.predict(*ec, my_tag, orA, oracle_actions.size(), cOn, cNa, alA, numAlA, alAcosts, learner_id, weight);
+  if (this->sch.priv->is_mixed_ldf)
+    for (size_t i = 0; i < ec_cnt; i++)
+      ec[i].skip_reduction_layer = 0;
 
   if (condition_on_names.size() > 0)
     condition_on_names.pop();  // un-null-terminate

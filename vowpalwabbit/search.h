@@ -19,7 +19,7 @@ namespace Search
 struct search_private;
 struct search_task;
 
-extern uint32_t AUTO_CONDITION_FEATURES, AUTO_HAMMING_LOSS, EXAMPLES_DONT_CHANGE, IS_LDF, NO_CACHING, ACTION_COSTS;
+extern uint32_t AUTO_CONDITION_FEATURES, AUTO_HAMMING_LOSS, EXAMPLES_DONT_CHANGE, IS_LDF, NO_CACHING, ACTION_COSTS, IS_MIXED_LDF;
 
 struct search;
 
@@ -164,6 +164,7 @@ struct search
 
   // set the number of learners
   void set_num_learners(size_t num_learners);
+  void set_num_learners(vector<bool>&); // |vec| = # of learners, vec[i] = is_ldf for learner i
 
   // get the action sequence from the test run (only run if test_only or -t or...)
   void get_test_action_sequence(vector<action>&);
@@ -305,6 +306,7 @@ private:
   v_array<action> allowed_actions;   bool allowed_is_pointer;  // if we're pointing to your memory TRUE; if it's our own memory FALSE
   v_array<float> allowed_actions_cost;   bool allowed_cost_is_pointer;  // if we're pointing to your memory TRUE; if it's our own memory FALSE
   size_t learner_id;
+  int32_t skip_reduction_layer;
   search&sch;
 
   template<class T> void make_new_pointer(v_array<T>& A, size_t new_size);

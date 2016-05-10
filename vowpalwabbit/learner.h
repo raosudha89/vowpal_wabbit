@@ -98,16 +98,29 @@ public:
   //called once for each example.  Must work under reduction.
   inline void learn(example& ec, size_t i=0)
   { ec.ft_offset += (uint32_t)(increment*i);
-    learn_fd.learn_f(learn_fd.data, *learn_fd.base, ec);
+    ec.skip_reduction_layer--;
+    if (ec.skip_reduction_layer == 0) learn_fd.base->learn(ec, 0);
+    else                              learn_fd.learn_f(learn_fd.data, *learn_fd.base, ec);
+    ec.skip_reduction_layer++;
     ec.ft_offset -= (uint32_t)(increment*i);
   }
   inline void predict(example& ec, size_t i=0)
   { ec.ft_offset += (uint32_t)(increment*i);
-    learn_fd.predict_f(learn_fd.data, *learn_fd.base, ec);
+    ec.skip_reduction_layer--;
+    if (ec.skip_reduction_layer == 0) learn_fd.base->predict(ec, 0);
+    else                              learn_fd.predict_f(learn_fd.data, *learn_fd.base, ec);
+    ec.skip_reduction_layer++;
     ec.ft_offset -= (uint32_t)(increment*i);
   }
   inline void multipredict(example& ec, size_t lo, size_t count, polyprediction* pred, bool finalize_predictions)
-  { if (learn_fd.multipredict_f == NULL)
+  {
+    ec.skip_reduction_layer--;
+    if (ec.skip_reduction_layer == 0)
+    { ec.ft_offset += (uint32_t)(increment*lo);
+      learn_fd.base->multipredict(ec, lo, count, pred, finalize_predictions);
+      ec.ft_offset -= (uint32_t)(increment*lo);
+    }
+    else if (learn_fd.multipredict_f == NULL)
     { ec.ft_offset += (uint32_t)(increment*lo);
       for (size_t c=0; c<count; c++)
       { learn_fd.predict_f(learn_fd.data, *learn_fd.base, ec);
@@ -123,6 +136,7 @@ public:
       learn_fd.multipredict_f(learn_fd.data, *learn_fd.base, ec, count, increment, pred, finalize_predictions);
       ec.ft_offset -= (uint32_t)(increment*lo);
     }
+    ec.skip_reduction_layer++;
   }
   inline void set_predict(void (*u)(T& data, base_learner& base, example&)) { learn_fd.predict_f = (tlearn)u; }
   inline void set_learn(void (*u)(T&, base_learner&, example&)) { learn_fd.learn_f = (tlearn)u; }
@@ -130,7 +144,10 @@ public:
 
   inline void update(example& ec, size_t i=0)
   { ec.ft_offset += (uint32_t)(increment*i);
-    learn_fd.update_f(learn_fd.data, *learn_fd.base, ec);
+    ec.skip_reduction_layer--;
+    if (ec.skip_reduction_layer == 0) learn_fd.base->update(ec, 0);
+    else                              learn_fd.update_f(learn_fd.data, *learn_fd.base, ec);
+    ec.skip_reduction_layer++;
     ec.ft_offset -= (uint32_t)(increment*i);
   }
   inline void set_update(void (*u)(T& data, base_learner& base, example&))
@@ -143,7 +160,11 @@ public:
   }
   inline float sensitivity(example& ec, size_t i=0)
   { ec.ft_offset += (uint32_t)(increment*i);
-    float ret = sensitivity_fd.sensitivity_f(learn_fd.data, *learn_fd.base, ec);
+    float ret;
+    ec.skip_reduction_layer--;
+    if (ec.skip_reduction_layer == 0) ret = learn_fd.base->sensitivity(ec, 0);
+    else                              ret = sensitivity_fd.sensitivity_f(learn_fd.data, *learn_fd.base, ec);
+    ec.skip_reduction_layer++;
     ec.ft_offset -= (uint32_t)(increment*i);
     return ret;
   }

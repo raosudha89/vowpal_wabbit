@@ -723,12 +723,14 @@ void predict_or_learn(ldf& data, base_learner& base, example &ec)
       THROW("error: label definition encountered in data block");
 
     data.ec_seq.push_back(&ec);
+    for (auto& ec2 : data.ec_seq) ec2->skip_reduction_layer = ec.skip_reduction_layer;
     do_actual_learning<is_learn>(data, base);
     data.need_to_clear = true;
   }
   else if ((example_is_newline(ec) && is_test_ec) || need_to_break)
   { if (need_to_break && data.first_pass)
       cerr << "warning: length of sequence at " << ec.example_counter << " exceeds ring size; breaking apart" << endl;
+    for (auto& ec2 : data.ec_seq) ec2->skip_reduction_layer = ec.skip_reduction_layer;
     do_actual_learning<is_learn>(data, base);
     data.need_to_clear = true;
   }
