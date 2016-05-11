@@ -164,12 +164,14 @@ void takedown(Search::search& sch, vector<example*>& ec)
 
 void run(Search::search& sch, vector<example*>& ec)
 { task_data& D = *sch.get_task_data<task_data>();
+  //cerr << "<<<<<<<<<< SequenceSpanTask::run >>>>>>>>>>" << endl;
   v_array<action> * y_allowed = &(D.allowed_actions);
   Search::predictor P(sch, (ptag)0);
   for (size_t pass=1; pass<=D.multipass; pass++)
   { action last_prediction = 1;
     for (size_t i=0; i<ec.size(); i++)
-    { action oracle = ec[i]->l.multi.label;
+    { //cerr << ">>>>>> i = " << i << endl;
+      action oracle = ec[i]->l.multi.label;
       size_t len = y_allowed->size();
       P.set_tag((ptag)i+1);
       P.set_learner_id(pass-1);

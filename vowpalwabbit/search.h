@@ -223,6 +223,7 @@ struct search
 
   vw& get_vw_pointer_unsafe();   // although you should rarely need this, some times you need a poiter to the vw data structure :(
   void set_force_oracle(bool force);  // if the library wants to force search to use the oracle, set this to true
+  void execute_set_options(uint32_t opts);
 };
 
 // for defining new tasks, you must fill out a search_task

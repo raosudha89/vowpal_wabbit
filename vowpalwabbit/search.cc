@@ -115,6 +115,18 @@ struct action_cache
 };
 std::ostream& operator << (std::ostream& os, const action_cache& x) { os << x.k << ':' << x.cost; if (x.is_opt) os << '*'; return os; }
 
+struct multitask_item
+{ search_task* task;
+  uint32_t opts;
+  size_t num_learners;
+  vector<bool>* learner_is_ldf;
+  
+  multitask_item(search_task* _task)
+      : task(_task), opts(0), num_learners(1), learner_is_ldf(nullptr)  {}
+  multitask_item(search_task* _task, uint32_t _opts)
+      : task(_task), opts(_opts), num_learners(1), learner_is_ldf(nullptr)  {}
+};
+  
 struct search_private
 { vw* all;
 
@@ -123,6 +135,7 @@ struct search_private
   bool examples_dont_change;     // set to true if you don't do any internal example munging
   bool is_ldf;                   // user task declared ldf (only)
   bool is_mixed_ldf;             // user task declared mixed ldf (must be used with multiple learners)
+  bool global_is_mixed_ldf;      // any task declared mixed ldf _or_ some tasks are ldf and some are not
   bool use_action_costs;         // task promises to define per-action rollout-by-ref costs
 
   v_array<int32_t> neighbor_features; // ugly encoding of neighbor feature requirements
@@ -130,12 +143,13 @@ struct search_private
   size_t history_length;         // value of --search_history_length, used by some tasks, default 1
 
   size_t A;                      // total number of actions, [1..A]; 0 means ldf
-  size_t num_learners;           // total number of learners;
+  size_t total_num_learners;     // total number of learners across all tasks
   bool cb_learner;               // do contextual bandit learning on action (was "! rollout_all_actions" which was confusing)
   SearchState state;             // current state of learning
   size_t learn_learner_id;       // we allow user to use different learners for different states
   int mix_per_roll_policy;       // for MIX_PER_ROLL, we need to choose a policy to use; this is where it's stored (-2 means "not selected yet")
   bool no_caching;               // turn off caching
+  bool global_no_caching;      // if command line says no caching, then DEFINITELY don't cache
   size_t rollout_num_steps;      // how many calls of "loss" before we stop really predicting on rollouts and switch to oracle (0 means "infinite")
   bool linear_ordering;          // insist that examples are generated in linear order (rather that the default hoopla permutation)
   bool (*label_is_test)(polylabel&); // tell me if the label data from an example is test
@@ -234,15 +248,15 @@ struct search_private
   example* empty_example;
   CS::label empty_cs_label;
 
-  search_task* task;    // your task!
+  multitask_item*  task;    // your task!
   search_metatask* metatask;  // your (optional) metatask
   BaseTask* metaoverride;
+  size_t learner_id_offset;
   size_t meta_t;  // the metatask has it's own notion of time. meta_t+t, during a single run, is the way to think about the "real" decision step but this really only matters for caching purposes
   v_array< v_array<action_cache>* > memo_foreach_action; // when foreach_action is on, we need to cache TRAIN trajectory actions for LEARN
 
-  v_array<search_task*>* multitask; // if you're doing MTL, then we keep track of each task individually
+  v_array<multitask_item>* multitask; // if you're doing MTL, then we keep track of each task individually
   size_t current_task;
-  vector<bool>* learner_is_ldf;
 };
 
 string   audit_feature_space("conditional");
@@ -320,7 +334,7 @@ int select_learner(search_private& priv, int policy, size_t learner_id, bool is_
       if (! is_local)
         learner_id += 1 + (size_t)( is_training ^ (priv.all->sd->example_number % 2 == 1) );
     }
-    int p = (int) (policy*priv.num_learners+learner_id);
+    int p = (int) (policy*priv.total_num_learners+learner_id);
     return p;
   }
 }
@@ -795,7 +809,7 @@ void allowed_actions_to_label(search_private& priv, size_t ec_cnt, const action*
   }
   else     // non-LDF, no action costs
   { if ((allowed_actions == nullptr) || (allowed_actions_cnt == 0))   // any action is allowed
-    { if (priv.is_mixed_ldf) cs_costs_erase(isCB, lab);
+    { if (priv.global_is_mixed_ldf) cs_costs_erase(isCB, lab);
       bool set_to_one = false;
       if (cs_get_costs_size(isCB, lab) != priv.A)
       { cs_costs_erase(isCB, lab);
@@ -913,7 +927,7 @@ action single_prediction_notLDF(search_private& priv, example& ec, int policy, c
   else
     ec.l.cs = priv.empty_cs_label;
 
-  if (priv.is_mixed_ldf) ec.skip_reduction_layer = 1;
+  if (priv.global_is_mixed_ldf) ec.skip_reduction_layer = 1;
   
   cdbg << "allowed_actions_cnt=" << allowed_actions_cnt << ", ec.l = ["; for (size_t i=0; i<ec.l.cs.costs.size(); i++) cdbg << ' ' << ec.l.cs.costs[i].class_index << ':' << ec.l.cs.costs[i].x; cdbg << " ]" << endl;
 
@@ -1012,12 +1026,12 @@ action single_prediction_LDF(search_private& priv, example* ecs, size_t ec_cnt, 
 
     polylabel old_label = ecs[a].l;
     ecs[a].l.cs = priv.ldf_test_label;
-    if (priv.is_mixed_ldf) ecs[a].skip_reduction_layer = 2;
+    if (priv.global_is_mixed_ldf) ecs[a].skip_reduction_layer = 2;
     priv.base_learner->predict(ecs[a], policy);
 
     priv.empty_example->in_use = true;
-    if (priv.is_mixed_ldf) priv.empty_example->skip_reduction_layer = 2;
-    priv.base_learner->predict(*priv.empty_example);
+    if (priv.global_is_mixed_ldf) priv.empty_example->skip_reduction_layer = 2;
+    priv.base_learner->predict(*priv.empty_example, policy);
 
     cdbg << "partial_prediction[" << a << "] = " << ecs[a].partial_prediction << endl;
 
@@ -1106,7 +1120,7 @@ void clear_cache_hash_map(search_private& priv)
 
 // returns true if found and do_store is false. if do_store is true, always returns true.
 bool cached_action_store_or_find(search_private& priv, ptag mytag, const ptag* condition_on, const char* condition_on_names, action_repr* condition_on_actions, size_t condition_on_cnt, int policy, size_t learner_id, action &a, bool do_store, float& a_cost)
-{ if (priv.no_caching) return do_store;
+{ if (priv.no_caching || priv.global_no_caching) return do_store;
   if (mytag == 0) return do_store; // don't attempt to cache when tag is zero
 
   size_t sz  = sizeof(size_t) + sizeof(ptag) + sizeof(int) + sizeof(size_t) + sizeof(size_t) + condition_on_cnt * (sizeof(ptag) + sizeof(action) + sizeof(char));
@@ -1142,11 +1156,12 @@ bool cached_action_store_or_find(search_private& priv, ptag mytag, const ptag* c
 
 void setup_learner_id(search_private& priv, size_t learner_id)
 { 
-  if (priv.learner_is_ldf != nullptr) { cdbg << "learner_is_ldf = ["; for (bool b : *priv.learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl; } 
-  if (priv.is_mixed_ldf && (priv.learner_is_ldf != nullptr))
-  { if (priv.learn_learner_id >= priv.learner_is_ldf->size())
-      THROW("setup_learner_id learner id " << priv.learn_learner_id << " when there are only " << priv.learner_is_ldf->size() << " learners");
-    priv.is_ldf = (*priv.learner_is_ldf)[learner_id];
+  if (priv.task->learner_is_ldf != nullptr) { cdbg << "learner_is_ldf = ["; for (bool b : *priv.task->learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl; } 
+  if (priv.is_mixed_ldf && (priv.task->learner_is_ldf != nullptr))
+  { if (learner_id >= priv.task->learner_is_ldf->size())
+      assert(false);
+      //THROW("setup_learner_id learner id " << learner_id << " when there are only " << priv.task->learner_is_ldf->size() << " learners");
+    priv.is_ldf = (*priv.task->learner_is_ldf)[learner_id];
     cdbg << "setup_learner_id just set is_ldf=" << priv.is_ldf << " for learner_id=" << learner_id << endl;
   }
   else cdbg << "setup_learner_id skipped learner_id=" << learner_id << endl;
@@ -1170,10 +1185,12 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
   priv.total_example_t += 1.;   // TODO: should be max-min
 
   int32_t skip_reduction_layer = 0;
-  if (priv.is_mixed_ldf && (priv.learner_is_ldf != nullptr))
-  { if (priv.learn_learner_id >= priv.learner_is_ldf->size())
-      THROW("generate_training_example learner id " << priv.learn_learner_id << " when there are only " << priv.learner_is_ldf->size() << " learners");
-    priv.is_ldf = (*priv.learner_is_ldf)[priv.learn_learner_id];
+  if (priv.global_is_mixed_ldf) {
+    if (priv.is_mixed_ldf && (priv.task->learner_is_ldf != nullptr))
+    { if (priv.learn_learner_id >= priv.task->learner_is_ldf->size())
+        THROW("generate_training_example learner id " << priv.learn_learner_id << " when there are only " << priv.task->learner_is_ldf->size() << " learners");
+      priv.is_ldf = (*priv.task->learner_is_ldf)[priv.learn_learner_id];
+    }
     skip_reduction_layer = priv.is_ldf ? 2 : 1;
   }
   
@@ -1336,6 +1353,7 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
     return a;
   }
 
+  setup_learner_id(priv, learner_id);
   // for LDF, # of valid actions is ec_cnt; otherwise it's either allowed_actions_cnt or A
   size_t valid_action_cnt = priv.is_ldf ? ec_cnt :
                             (allowed_actions_cnt > 0) ? allowed_actions_cnt : priv.A;
@@ -1347,10 +1365,8 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
   if ((priv.state == LEARN) && (t == priv.learn_t))
   { action a = (action)priv.learn_a_idx;
     priv.loss_declared_cnt = 0;
-
-    setup_learner_id(priv, learner_id);
     
-    cdbg << "LEARN " << t << " = priv.learn_t ==> a=" << a << endl;
+    cdbg << "LEARN " << t << " = priv.learn_t ==> a=" << a << ", is_ldf=" << priv.is_ldf << " valid_action_cnt=" << valid_action_cnt << " priv.A=" << priv.A << endl;
 
     priv.learn_a_idx++;
 
@@ -1662,7 +1678,7 @@ void BaseTask::Run()
 
   priv.t = 0;
   priv.metaoverride = this;
-  priv.task->run(*sch, ec);
+  priv.task->task->run(*sch, ec);
   priv.metaoverride = nullptr;
   priv.meta_t += priv.t;
 
@@ -1683,7 +1699,7 @@ void run_task(search& sch, vector<example*>& ec)
   if (priv.metatask && (priv.state != GET_TRUTH_STRING))
     priv.metatask->run(sch, ec);
   else
-    priv.task->run(sch, ec);
+    priv.task->task->run(sch, ec);
 }
 
 template <bool is_learn>
@@ -1692,7 +1708,7 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
   vw&all = *priv.all;
   bool ran_test = false;  // we must keep track so that even if we skip test, we still update # of examples seen
 
-  //if (! priv.no_caching)
+  //if (! priv.no_caching || priv.global_no_caching)
   clear_cache_hash_map(priv);
 
   cdbg << "is_test_ex=" << is_test_ex << " vw_is_main=" << all.vw_is_main << endl;
@@ -1838,7 +1854,7 @@ void do_actual_learning_known_task(vw&all, search& sch)
     if (is_test_ex && is_holdout_ex) break;
   }
 
-  if (priv.task->run_setup) priv.task->run_setup(sch, priv.ec_seq);
+  if (priv.task->task->run_setup) priv.task->task->run_setup(sch, priv.ec_seq);
 
   // if we're going to have to print to the screen, generate the "truth" string
   cdbg << "======================================== GET TRUTH STRING (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
@@ -1858,7 +1874,7 @@ void do_actual_learning_known_task(vw&all, search& sch)
   train_single_example<is_learn>(sch, is_test_ex, is_holdout_ex);
   del_neighbor_features(priv);
 
-  if (priv.task->run_takedown) priv.task->run_takedown(sch, priv.ec_seq);
+  if (priv.task->task->run_takedown) priv.task->task->run_takedown(sch, priv.ec_seq);
 }
 
 int32_t get_multitask_id(example& ec)
@@ -1876,10 +1892,13 @@ int32_t get_multitask_id(example& ec)
   return task;
 }
 
-void set_multitask_id(search_private& priv, int32_t task_id)
-{ priv.task = priv.multitask->get(task_id);
+void set_multitask_id(search&sch, search_private& priv, int32_t task_id)
+{ priv.task = &priv.multitask->get(task_id);
   priv.current_task = task_id;
-  // TODO: set options appropriately
+  sch.execute_set_options(priv.task->opts);
+  priv.learner_id_offset = 0;
+  for (int32_t i=0; i<task_id; i++) priv.learner_id_offset += priv.multitask->get(i).num_learners;
+  cdbg << "set_multitask_id set to " << task_id << ", learner_id_offset=" << priv.learner_id_offset << endl;
 }
 
   
@@ -1905,7 +1924,7 @@ void do_actual_learning(vw&all, search& sch)  // first, might need to figure out
       return;
     }
     assert(priv.task == nullptr);
-    set_multitask_id(priv, task_id-1);
+    set_multitask_id(sch, priv, task_id-1);
     vector<example*> old_ec_seq;
     for (example* ec : priv.ec_seq) old_ec_seq.push_back(ec);
     priv.ec_seq.clear();
@@ -2012,7 +2031,7 @@ void search_initialize(vw* all, search& sch)
   priv.label_is_test = mc_label_is_test;
 
   priv.A = 1;
-  priv.num_learners = 1;
+  priv.total_num_learners = 1;
   priv.state = INITIALIZE;
   priv.mix_per_roll_policy = -2;
   priv.multitask = nullptr;
@@ -2052,7 +2071,7 @@ void search_initialize(vw* all, search& sch)
   CS::cs_label.default_label(&priv.empty_cs_label);
 
   priv.current_task = 0;
-  priv.learner_is_ldf = nullptr;
+  priv.task = nullptr;
   
   new (&priv.rawOutputString) string();
   priv.rawOutputStringStream = new stringstream(priv.rawOutputString);
@@ -2121,17 +2140,20 @@ void search_finish(search& sch)
   priv.learn_condition_on_act.delete_v();
 
   if (priv.multitask)
-  { for (search_task* task : *priv.multitask)
-      if (task->finish) task->finish(sch);
+  { for (multitask_item& task : *priv.multitask)
+    { if (task.task->finish) task.task->finish(sch);
+      if (task.learner_is_ldf != nullptr) delete task.learner_is_ldf;
+    }
     priv.multitask->delete_v();
     delete priv.multitask;
   }
-  else if (priv.task->finish) priv.task->finish(sch);
+  else
+  { if (priv.task->task->finish) priv.task->task->finish(sch);
+    if (priv.task->learner_is_ldf != nullptr) delete priv.task->learner_is_ldf;
+    delete priv.task;
+  }
   
   if (priv.metatask && priv.metatask->finish) priv.metatask->finish(sch);
-
-  if (priv.learner_is_ldf != nullptr)
-    delete priv.learner_is_ldf;
   
   if (sch.alloced_ldf_examples)
   { sch.ldf_alloc(0);
@@ -2271,12 +2293,12 @@ void parse_task_names(search& sch, search_private& priv, string& task_string)
   if (all_task_names.size() == 1)
   { for (search_task** mytask = all_tasks; *mytask != nullptr; ++mytask)
       if (task_string.compare((*mytask)->task_name) == 0)
-      { priv.task = *mytask;
+      { priv.task = new multitask_item(*mytask);
         sch.task_name = (*mytask)->task_name;
         break;
       }
   } else
-  { priv.multitask = new v_array<search_task*>();
+  { priv.multitask = new v_array<multitask_item>();
     sch.task_name = "multitask";
     for (substring& ss : all_task_names)
     { bool found = false;
@@ -2366,7 +2388,7 @@ base_learner* setup(vw&all)
   if (vm.count("search_beta"))                    priv.beta                 = vm["search_beta"             ].as<float>();
 
   if (vm.count("search_subsample_time"))          priv.subsample_timesteps  = vm["search_subsample_time"].as<float>();
-  if (vm.count("search_no_caching"))              priv.no_caching           = true;
+  if (vm.count("search_no_caching"))              priv.global_no_caching = true;
   if (vm.count("search_rollout_num_steps"))       priv.rollout_num_steps    = vm["search_rollout_num_steps"].as<size_t>();
 
   if (vm.count("search_force_oracle"))            priv.force_oracle         = true;
@@ -2397,7 +2419,7 @@ base_learner* setup(vw&all)
   else if ((rollout_string.compare("oracle") == 0)       || (rollout_string.compare("ref") == 0))            priv.rollout_method = ORACLE;
   else if ((rollout_string.compare("mix_per_state") == 0))                                                   priv.rollout_method = MIX_PER_STATE;
   else if ((rollout_string.compare("mix_per_roll") == 0) || (rollout_string.compare("mix") == 0))            priv.rollout_method = MIX_PER_ROLL;
-  else if ((rollout_string.compare("none") == 0))          { priv.rollout_method = NO_ROLLOUT; priv.no_caching = true; }
+  else if ((rollout_string.compare("none") == 0))          { priv.rollout_method = NO_ROLLOUT; priv.global_no_caching = true; }
   else
     THROW("error: --search_rollout must be 'learn', 'ref', 'mix', 'mix_per_state' or 'none'");
 
@@ -2504,13 +2526,26 @@ base_learner* setup(vw&all)
   base_learner* base = setup_base(all);
 
   // default to OAA labels unless the task wants to override this (which they can do in initialize)
+  assert( (priv.task == nullptr) || (priv.multitask == nullptr) );
+  assert( (priv.task != nullptr) || (priv.multitask != nullptr) );
   all.p->lp = MC::mc_label;
-  if (priv.task && priv.task->initialize)
-    priv.task->initialize(sch, priv.A, vm);
+  if (priv.task && priv.task->task->initialize)
+    priv.task->task->initialize(sch, priv.A, vm);
   if (priv.multitask)
-    for (search_task* task : *priv.multitask)
-      if (task->initialize)
-        task->initialize(sch, priv.A, vm);
+  { bool some_ldf = false;
+    bool some_non_ldf = false;
+    for (multitask_item& task : *priv.multitask)
+    { priv.task = &task;
+      if (task.task->initialize)
+        task.task->initialize(sch, priv.A, vm);
+      if (priv.is_mixed_ldf) { some_ldf = true; some_non_ldf = true; }
+      else if (priv.is_ldf)    some_ldf = true;
+      else                     some_non_ldf = true;
+    }
+    priv.task = nullptr;
+    if (some_ldf && some_non_ldf)
+      priv.global_is_mixed_ldf = true;
+  }
   if (priv.metatask && priv.metatask->initialize)
     priv.metatask->initialize(sch, priv.A, vm);
   priv.meta_t = 0;
@@ -2527,16 +2562,22 @@ base_learner* setup(vw&all)
 
   priv.start_clock_time = clock();
 
-  if (priv.xv) priv.num_learners *= 3;
-
-  cdbg << "num_learners = " << priv.num_learners << endl;
-
-  size_t num_tasks = priv.multitask ? priv.multitask->size() : 1;
+  if (priv.task != nullptr) priv.total_num_learners = priv.task->num_learners;
+  else
+  { priv.total_num_learners = 0;
+    for (multitask_item& task : *priv.multitask)
+      priv.total_num_learners += task.num_learners;
+  }
   
+  if (priv.xv) priv.total_num_learners *= 3;
+
+  // TODO: sum all num_learners
+  cdbg << "num_learners = " << priv.total_num_learners << endl;
+
   learner<search>& l = init_learner(&sch, base,
                                     search_predict_or_learn<true>,
                                     search_predict_or_learn<false>,
-                                    priv.total_number_of_policies * priv.num_learners * num_tasks);
+                                    priv.total_number_of_policies * priv.total_num_learners);
   l.set_finish_example(finish_example);
   l.set_end_examples(end_examples);
   l.set_finish(search_finish);
@@ -2593,8 +2634,9 @@ action search::predict(example& ec, ptag mytag, const action* oracle_actions, si
 
 action search::predictLDF(example* ecs, size_t ec_cnt, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, size_t learner_id, float weight)
 { float a_cost = 0.;
-  if (priv->multitask != nullptr)
-    learner_id = priv->multitask->size() * learner_id + priv->current_task; // TODO don't have size in the inner loop
+  //if (priv->multitask != nullptr)
+  //  learner_id = priv->multitask->size() * learner_id + priv->current_task; // TODO don't have size in the inner loop
+  learner_id += priv->learner_id_offset;
   // TODO: action costs for ldf
   action a = search_predict(*priv, ecs, ec_cnt, mytag, oracle_actions, oracle_actions_cnt, condition_on, condition_on_names, nullptr, 0, nullptr, learner_id, a_cost, weight);
   if (priv->state == INIT_TEST) priv->test_action_sequence.push_back(a);
@@ -2625,23 +2667,24 @@ stringstream& search::output()
   else                                             return *(this->priv->pred_string);
 }
 
-void set_option_bit(uint32_t opts, uint32_t opt, bool& bit, bool okay_to_reset=false) {
-  if ((opts & opt) != 0) { bit = true; return; }
-  if (bit && !okay_to_reset)
-    THROW("task first turned an option on (" << opt << ") and then turned it off! this isn't allowed" << endl << "this probably happened because of multitask learning with incompatible tasks" << endl);
+void set_option_bit(uint32_t opts, uint32_t opt, bool& bit) { bit = (opts & opt) != 0; }
+
+void search::execute_set_options(uint32_t opts)
+{ set_option_bit(opts, AUTO_CONDITION_FEATURES, this->priv->auto_condition_features);
+  set_option_bit(opts, AUTO_HAMMING_LOSS      , this->priv->auto_hamming_loss);
+  set_option_bit(opts, EXAMPLES_DONT_CHANGE   , this->priv->examples_dont_change);
+  set_option_bit(opts, IS_LDF                 , this->priv->is_ldf);
+  set_option_bit(opts, IS_MIXED_LDF           , this->priv->is_mixed_ldf);
+  set_option_bit(opts, NO_CACHING             , this->priv->no_caching);
+  set_option_bit(opts, ACTION_COSTS           , this->priv->use_action_costs);
 }
   
 void  search::set_options(uint32_t opts)
 { if (this->priv->all->vw_is_main && (this->priv->state != INITIALIZE))
     std::cerr << "warning: task should not set options except in initialize function!" << endl;
-  set_option_bit(opts, AUTO_CONDITION_FEATURES, this->priv->auto_condition_features);
-  set_option_bit(opts, AUTO_HAMMING_LOSS      , this->priv->auto_hamming_loss);
-  set_option_bit(opts, EXAMPLES_DONT_CHANGE   , this->priv->examples_dont_change);
-  set_option_bit(opts, IS_LDF                 , this->priv->is_ldf);
-  set_option_bit(opts, IS_MIXED_LDF           , this->priv->is_mixed_ldf);
-  set_option_bit(opts, NO_CACHING             , this->priv->no_caching, true);
-  set_option_bit(opts, ACTION_COSTS           , this->priv->use_action_costs);
-
+  this->priv->task->opts = opts;
+  execute_set_options(opts);
+      
   if (this->priv->is_ldf && this->priv->is_mixed_ldf)
   { std::cerr << "warning: task is declaring both IS_LDF and IS_MIXED_LDF; assuming IS_MIXED_LDF only" << endl;
     this->priv->is_ldf = false;
@@ -2671,19 +2714,19 @@ void search::get_test_action_sequence(vector<action>& V)
 
 
 void search::set_num_learners(size_t num_learners)
-{ this->priv->num_learners = num_learners;
-  if (this->priv->learner_is_ldf != nullptr)
-  { delete this->priv->learner_is_ldf;
-    this->priv->learner_is_ldf = nullptr;
+{ this->priv->task->num_learners = num_learners;
+  if (this->priv->task->learner_is_ldf != nullptr)
+  { delete this->priv->task->learner_is_ldf;
+    this->priv->task->learner_is_ldf = nullptr;
   }
 }
 void search::set_num_learners(vector<bool>& learner_is_ldf)
-{ this->priv->num_learners = learner_is_ldf.size();
-  if (this->priv->learner_is_ldf != nullptr) delete this->priv->learner_is_ldf;
-  this->priv->learner_is_ldf = new vector<bool>(); // TODO: check consistency in mixed_ldf and learner_is_ldf
+{ this->priv->task->num_learners = learner_is_ldf.size();
+  if (this->priv->task->learner_is_ldf != nullptr) delete this->priv->task->learner_is_ldf;
+  this->priv->task->learner_is_ldf = new vector<bool>(); // TODO: check consistency in mixed_ldf and learner_is_ldf
   for (bool b : learner_is_ldf)
-    this->priv->learner_is_ldf->push_back(b);
-  cdbg << "learner_is_ldf = ["; for (bool b : *this->priv->learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl;
+    this->priv->task->learner_is_ldf->push_back(b);
+  cdbg << "learner_is_ldf = ["; for (bool b : *this->priv->task->learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl;
 }
 
 void search::add_program_options(po::variables_map& /*vw*/, po::options_description& opts) { add_options( *this->priv->all, opts ); }
@@ -2997,10 +3040,10 @@ predictor& predictor::set_condition_range(ptag hi, ptag count, char name0) { con
 
 predictor& predictor::set_learner_id(size_t id)
 { learner_id = id;
-  if (this->sch.priv->is_mixed_ldf && (this->sch.priv->learner_is_ldf != nullptr))
-  { if (id >= this->sch.priv->learner_is_ldf->size())
-      THROW("set_learner_id " << id << " when there are only " << this->sch.priv->learner_is_ldf->size() << " learners");
-    this->is_ldf = (*this->sch.priv->learner_is_ldf)[id];
+  if (this->sch.priv->is_mixed_ldf && (this->sch.priv->task->learner_is_ldf != nullptr))
+  { if (id >= this->sch.priv->task->learner_is_ldf->size())
+      THROW("set_learner_id " << id << " when there are only " << this->sch.priv->task->learner_is_ldf->size() << " learners");
+    this->is_ldf = (*this->sch.priv->task->learner_is_ldf)[id];
     this->skip_reduction_layer = this->is_ldf ? 2 : 1;
   }
   return *this;
@@ -3019,13 +3062,13 @@ action predictor::predict()
   const action* alA      = (allowed_actions.size() == 0) ? nullptr : allowed_actions.begin();
   const float*  alAcosts = (allowed_actions_cost.size() == 0) ? nullptr : allowed_actions_cost.begin();
   size_t numAlA = max(allowed_actions.size(), allowed_actions_cost.size());
-  if (this->sch.priv->is_mixed_ldf)
+  if (this->sch.priv->global_is_mixed_ldf)
     for (size_t i = 0; i < ec_cnt; i++)
       ec[i].skip_reduction_layer = skip_reduction_layer;
   action p = is_ldf
              ? sch.predictLDF(ec, ec_cnt, my_tag, orA, oracle_actions.size(), cOn, cNa, learner_id, weight)
              : sch.predict(*ec, my_tag, orA, oracle_actions.size(), cOn, cNa, alA, numAlA, alAcosts, learner_id, weight);
-  if (this->sch.priv->is_mixed_ldf)
+  if (this->sch.priv->global_is_mixed_ldf)
     for (size_t i = 0; i < ec_cnt; i++)
       ec[i].skip_reduction_layer = 0;
 
@@ -3036,3 +3079,6 @@ action predictor::predict()
 }
 
 // TODO: valgrind --leak-check=full ./vw --search 2 -k -c --passes 1 --search_task sequence -d test_beam --holdout_off --search_rollin policy --search_metatask selective_branching 2>&1 | less
+
+// TODO: move ldf_examples to priv.multitask so each task gets its own
+// TODO: c to make sure csoaa/ldf match task desires

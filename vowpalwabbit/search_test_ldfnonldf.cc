@@ -36,9 +36,11 @@ void my_update_example_indicies(Search::search& sch, bool audit, example* ec, ui
 void run(Search::search& sch, vector<example*>& ec)
 { action num_actions = sch.ldf_count();
   Search::predictor P(sch, (ptag)0);
+  //cerr << "<<<<<<<<<< LDFnonLDF::run >>>>>>>>>>" << endl;
 
   for (ptag i=0; i<ec.size(); i++)
-  { // on even examples, do non-ldf; on odd examples, do ldf
+  { //cerr << ">>>>>> i = " << i << endl;
+    // on even examples, do non-ldf; on odd examples, do ldf
     action prediction;
     action oracle = ec[i]->l.multi.label;
     if ((i % 2) == 0)

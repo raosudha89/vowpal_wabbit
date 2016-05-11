@@ -261,7 +261,7 @@ void output_example(vw& all, example& ec)
 }
 
 bool example_is_test(example& ec)
-{ v_array<COST_SENSITIVE::wclass> costs = ec.l.cs.costs;
+{ v_array<COST_SENSITIVE::wclass>& costs = ec.l.cs.costs;
   if (costs.size() == 0) return true;
   for (size_t j=0; j<costs.size(); j++)
     if (costs[j].x != FLT_MAX) return false;
@@ -269,7 +269,7 @@ bool example_is_test(example& ec)
 }
 
 bool ec_is_example_header(example& ec)  // example headers look like "0:-1" or just "shared"
-{ v_array<COST_SENSITIVE::wclass> costs = ec.l.cs.costs;
+{ v_array<COST_SENSITIVE::wclass>& costs = ec.l.cs.costs;
   if (costs.size() != 1) return false;
   if (costs[0].class_index != 0) return false;
   if (costs[0].x != -FLT_MAX) return false;
