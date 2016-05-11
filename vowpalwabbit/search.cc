@@ -120,11 +120,13 @@ struct multitask_item
   uint32_t opts;
   size_t num_learners;
   vector<bool>* learner_is_ldf;
+  example* alloced_ldf_examples;
+  size_t   alloced_ldf_examples_count;
   
   multitask_item(search_task* _task)
-      : task(_task), opts(0), num_learners(1), learner_is_ldf(nullptr)  {}
+      : task(_task), opts(0), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0)  {}
   multitask_item(search_task* _task, uint32_t _opts)
-      : task(_task), opts(_opts), num_learners(1), learner_is_ldf(nullptr)  {}
+      : task(_task), opts(_opts), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0)  {}
 };
   
 struct search_private
@@ -153,6 +155,7 @@ struct search_private
   size_t rollout_num_steps;      // how many calls of "loss" before we stop really predicting on rollouts and switch to oracle (0 means "infinite")
   bool linear_ordering;          // insist that examples are generated in linear order (rather that the default hoopla permutation)
   bool (*label_is_test)(polylabel&); // tell me if the label data from an example is test
+  label_parser* desired_label_parser;
 
   size_t t;                      // current search step
   size_t T;                      // length of root trajectory
@@ -2080,6 +2083,16 @@ void search_initialize(vw* all, search& sch)
   new (&priv.dat_new_feature_audit_ss) stringstream();
 }
 
+void finish_task(search& sch, multitask_item& task)
+{ if (task.task->finish) task.task->finish(sch);
+  if (task.learner_is_ldf != nullptr) delete task.learner_is_ldf;
+  if (task.alloced_ldf_examples != nullptr)
+  { for (size_t a=0; a<task.alloced_ldf_examples_count; a++)
+      VW::dealloc_example(CS::cs_label.delete_label, task.alloced_ldf_examples[a]);
+    free(task.alloced_ldf_examples);
+  }
+}
+  
 void search_finish(search& sch)
 { search_private& priv = *sch.priv;
   cdbg << "search_finish" << endl;
@@ -2141,25 +2154,17 @@ void search_finish(search& sch)
 
   if (priv.multitask)
   { for (multitask_item& task : *priv.multitask)
-    { if (task.task->finish) task.task->finish(sch);
-      if (task.learner_is_ldf != nullptr) delete task.learner_is_ldf;
-    }
+      finish_task(sch, task);
     priv.multitask->delete_v();
     delete priv.multitask;
   }
   else
-  { if (priv.task->task->finish) priv.task->task->finish(sch);
-    if (priv.task->learner_is_ldf != nullptr) delete priv.task->learner_is_ldf;
+  { finish_task(sch, *priv.task);
     delete priv.task;
   }
   
   if (priv.metatask && priv.metatask->finish) priv.metatask->finish(sch);
   
-  if (sch.alloced_ldf_examples)
-  { sch.ldf_alloc(0);
-    free(sch.alloced_ldf_examples);
-  }
-
   free(priv.allowed_actions_cache);
   delete priv.rawOutputStringStream;
   free (sch.priv);
@@ -2514,21 +2519,23 @@ base_learner* setup(vw&all)
     }
   all.p->emptylines_separate_examples = true;
 
-  if (count(all.args.begin(), all.args.end(),"--csoaa") == 0
-      && count(all.args.begin(), all.args.end(),"--csoaa_ldf") == 0
-      && count(all.args.begin(), all.args.end(),"--wap_ldf") == 0
-      && count(all.args.begin(), all.args.end(),"--cb") == 0)
-  { all.args.push_back("--csoaa");
-    stringstream ss;
-    ss << vm["search"].as<size_t>();
-    all.args.push_back(ss.str());
-  }
-  base_learner* base = setup_base(all);
+  bool args_has_non_ldf = (count(all.args.begin(), all.args.end(),"--csoaa") > 0) ||
+                          (count(all.args.begin(), all.args.end(),"--cb") > 0);
+  bool args_has_ldf     = (count(all.args.begin(), all.args.end(),"--csoaa_ldf") > 0) ||
+                          (count(all.args.begin(), all.args.end(),"--wap_ldf") > 0);
 
-  // default to OAA labels unless the task wants to override this (which they can do in initialize)
+  // if (priv.is_ldf && (!priv.global_is_mixed_ldf) && args_has_non_ldf)
+  // { std::cerr << "search for an LDF problem was initialized with a non-LDF cost-sensitive learner" << endl;
+  //   exit(0);
+  // }
+  // if ((!priv.is_ldf) && (!priv.global_is_mixed_ldf) && args_has_ldf)
+  // { std::cerr << "search for a non-LDF problem was initialized with an LDF cost-sensitive learner" << endl;
+  //   exit(0);
+  // }
+  
+   // default to OAA labels unless the task wants to override this (which they can do in initialize)
   assert( (priv.task == nullptr) || (priv.multitask == nullptr) );
   assert( (priv.task != nullptr) || (priv.multitask != nullptr) );
-  all.p->lp = MC::mc_label;
   if (priv.task && priv.task->task->initialize)
     priv.task->task->initialize(sch, priv.A, vm);
   if (priv.multitask)
@@ -2549,7 +2556,24 @@ base_learner* setup(vw&all)
   if (priv.metatask && priv.metatask->initialize)
     priv.metatask->initialize(sch, priv.A, vm);
   priv.meta_t = 0;
+  
+  if ((priv.is_ldf || priv.is_mixed_ldf || priv.global_is_mixed_ldf) && (! args_has_ldf))
+  { all.args.push_back("--csoaa_ldf");
+    all.args.push_back("m");
+    cerr << "adding --csoaa_ldf m" << endl;
+  }
 
+  if (((!priv.is_ldf) || priv.global_is_mixed_ldf) && (! args_has_non_ldf))
+  { stringstream ss;
+    ss << vm["search"].as<size_t>();
+    all.args.push_back("--csoaa");    
+    all.args.push_back(ss.str());
+    cerr << "adding --csoaa " << ss.str() << endl;
+  }
+
+  base_learner* base = setup_base(all);
+  all.p->lp = (priv.desired_label_parser == nullptr) ? MC::mc_label : *priv.desired_label_parser;
+  
   if (vm.count("search_allowed_transitions"))     read_allowed_transitions((action)priv.A, vm["search_allowed_transitions"].as<string>().c_str());
 
   // set up auto-history (used to only do this if AUTO_CONDITION_FEATURES was on, but that doesn't work for hooktask)
@@ -2702,7 +2726,10 @@ void  search::set_options(uint32_t opts)
 void search::set_label_parser(label_parser&lp, bool (*is_test)(polylabel&))
 { if (this->priv->all->vw_is_main && (this->priv->state != INITIALIZE))
     std::cerr << "warning: task should not set label parser except in initialize function!" << endl;
-  this->priv->all->p->lp = lp;
+  //this->priv->all->p->lp = lp;
+  if (this->priv->desired_label_parser != nullptr)
+    THROW("duplicate calls to set_label_parser disallowed; perhaps two different tasks want different parsers?");
+  this->priv->desired_label_parser = &lp;
   this->priv->label_is_test = is_test;
 }
 
@@ -2748,11 +2775,11 @@ string search::pretty_label(action a)
 }
   
 void search::ldf_alloc(size_t numExamples)
-{ if (alloced_ldf_examples == nullptr)
-  { alloced_ldf_examples = VW::alloc_examples(sizeof(CS::label), numExamples);
-    alloced_ldf_examples_count = numExamples;
+{ if (priv->task->alloced_ldf_examples == nullptr)
+  { priv->task->alloced_ldf_examples = VW::alloc_examples(sizeof(CS::label), numExamples);
+    priv->task->alloced_ldf_examples_count = numExamples;
     for (size_t a=0; a<numExamples; a++)
-    { CS::label& lab = alloced_ldf_examples[a].l.cs;
+    { CS::label& lab = priv->task->alloced_ldf_examples[a].l.cs;
       CS::cs_label.default_label(&lab);
       CS::wclass wclass = { 0., (uint32_t)a, 0., 0. };
       lab.costs.push_back(wclass);
@@ -2760,26 +2787,26 @@ void search::ldf_alloc(size_t numExamples)
     return;
   }
   // otherwise, already alloced
-  if (numExamples == alloced_ldf_examples_count) return;  // phew!
-  if (numExamples <  alloced_ldf_examples_count)
-  { for (size_t a=numExamples; a<alloced_ldf_examples_count; a++)
-      VW::dealloc_example(CS::cs_label.delete_label, alloced_ldf_examples[a]);
-    alloced_ldf_examples_count = numExamples;
+  if (numExamples == priv->task->alloced_ldf_examples_count) return;  // phew!
+  if (numExamples <  priv->task->alloced_ldf_examples_count)
+  { for (size_t a=numExamples; a<priv->task->alloced_ldf_examples_count; a++)
+      VW::dealloc_example(CS::cs_label.delete_label, priv->task->alloced_ldf_examples[a]);
+    priv->task->alloced_ldf_examples_count = numExamples;
     return;
   }
   // finally, we want MORE examples!
-  example* old_ex = alloced_ldf_examples;
-  size_t   old_cnt = alloced_ldf_examples_count;
-  alloced_ldf_examples = VW::alloc_examples(sizeof(CS::label), numExamples);
-  alloced_ldf_examples_count = numExamples;
+  example* old_ex = priv->task->alloced_ldf_examples;
+  size_t   old_cnt = priv->task->alloced_ldf_examples_count;
+  priv->task->alloced_ldf_examples = VW::alloc_examples(sizeof(CS::label), numExamples);
+  priv->task->alloced_ldf_examples_count = numExamples;
   for (size_t a=0; a<old_cnt; a++)
-  { VW::copy_example_data(false, alloced_ldf_examples+a, old_ex+a);
-    CS::label& lab = alloced_ldf_examples[a].l.cs;
+  { VW::copy_example_data(false, priv->task->alloced_ldf_examples+a, old_ex+a);
+    CS::label& lab = priv->task->alloced_ldf_examples[a].l.cs;
     CS::cs_label.default_label(&lab);
     CS::cs_label.copy_label(&lab, &old_ex[a].l.cs);
   }
   for (size_t a=old_cnt; a<numExamples; a++)
-  { CS::label& lab = alloced_ldf_examples[a].l.cs;
+  { CS::label& lab = priv->task->alloced_ldf_examples[a].l.cs;
     CS::cs_label.default_label(&lab);
     CS::wclass wclass = { 0., (uint32_t)a, 0., 0. };
     lab.costs.push_back(wclass);
@@ -2788,17 +2815,17 @@ void search::ldf_alloc(size_t numExamples)
     VW::dealloc_example(CS::cs_label.delete_label, old_ex[a]);
 }
 
-size_t search::ldf_count() { return alloced_ldf_examples_count; }
+size_t search::ldf_count() { return priv->task->alloced_ldf_examples_count; }
   
 example* search::ldf_example(size_t i)
-{ if (i >= alloced_ldf_examples_count) return nullptr;
-  return &(alloced_ldf_examples[i]);
+{ if (i >= priv->task->alloced_ldf_examples_count) return nullptr;
+  return &(priv->task->alloced_ldf_examples[i]);
 }
 
 void search::ldf_set_label(size_t i, action a, float cost)
-{ if (i >= alloced_ldf_examples_count)
+{ if (i >= priv->task->alloced_ldf_examples_count)
     THROW("search::ldf_set_label on example greater than count");
-  CS::label& lab = alloced_ldf_examples[i].l.cs;
+  CS::label& lab = priv->task->alloced_ldf_examples[i].l.cs;
   if (lab.costs.size() == 0) {
     CS::wclass wclass = { cost, a, 0., 0. };
     lab.costs.push_back(wclass);
@@ -2812,9 +2839,9 @@ void search::ldf_set_label(size_t i, action a, float cost)
 }
 
 action search::ldf_get_label(size_t i)
-{ if (i >= alloced_ldf_examples_count)
+{ if (i >= priv->task->alloced_ldf_examples_count)
     THROW("search::ldf_get_label on example greater than count");
-  CS::label& lab = alloced_ldf_examples[i].l.cs;
+  CS::label& lab = priv->task->alloced_ldf_examples[i].l.cs;
   if (lab.costs.size() == 0)
     THROW("search::ldf_get_label costs.size == 0");
   return lab.costs[0].class_index;
@@ -3080,5 +3107,3 @@ action predictor::predict()
 
 // TODO: valgrind --leak-check=full ./vw --search 2 -k -c --passes 1 --search_task sequence -d test_beam --holdout_off --search_rollin policy --search_metatask selective_branching 2>&1 | less
 
-// TODO: move ldf_examples to priv.multitask so each task gets its own
-// TODO: c to make sure csoaa/ldf match task desires

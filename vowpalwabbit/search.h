@@ -218,9 +218,6 @@ struct search
   const char*     metatask_name;
 
   // data for ldf examples
-  example* alloced_ldf_examples;
-  size_t   alloced_ldf_examples_count;
-
   vw& get_vw_pointer_unsafe();   // although you should rarely need this, some times you need a poiter to the vw data structure :(
   void set_force_oracle(bool force);  // if the library wants to force search to use the oracle, set this to true
   void execute_set_options(uint32_t opts);
