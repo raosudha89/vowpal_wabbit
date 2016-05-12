@@ -32,6 +32,7 @@ std::ostream& operator<<(std::ostream& os, const v_array<substring>& ss);
 void tokenize(char delim, substring s, v_array<substring> &ret, bool allow_empty=false);
 
 bool substring_equal(substring&a, substring&b);
+bool substring_equal(substring&a, const char*b);
 
 inline char* safe_index(char *start, char v, char *max)
 { while (start != max && *start != v)

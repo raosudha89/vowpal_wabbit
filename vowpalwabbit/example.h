@@ -83,6 +83,7 @@ struct example // core example datatype.
   v_array<namespace_index> indices;
   features feature_space[256]; //Groups of feature values.
   uint64_t ft_offset;//An offset for all feature values.
+  int32_t skip_reduction_layer; // should we skip any reductions? if so, >=1.
 
   //helpers
   size_t num_features;//precomputed, cause it's fast&easy.

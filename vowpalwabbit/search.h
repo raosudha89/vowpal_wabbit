@@ -19,7 +19,7 @@ namespace Search
 struct search_private;
 struct search_task;
 
-extern uint32_t AUTO_CONDITION_FEATURES, AUTO_HAMMING_LOSS, EXAMPLES_DONT_CHANGE, IS_LDF, NO_CACHING, ACTION_COSTS;
+extern uint32_t AUTO_CONDITION_FEATURES, AUTO_HAMMING_LOSS, EXAMPLES_DONT_CHANGE, IS_LDF, NO_CACHING, ACTION_COSTS, IS_MIXED_LDF;
 
 struct search;
 
@@ -48,8 +48,8 @@ public:
 struct search
 { // INTERFACE
   // for managing task-specific data that you want on the heap:
-  template<class T> void  set_task_data(T*data)           { task_data = data; }
-  template<class T> T*    get_task_data()                 { return (T*)task_data; }
+  template<class T> void  set_task_data(T*data) { unsafe_set_task_data((void*)data); }
+  template<class T> T*    get_task_data() { return (T*)unsafe_get_task_data(); }
 
   // for managing metatask-specific data
   template<class T> void  set_metatask_data(T*data)           { metatask_data = data; }
@@ -151,7 +151,12 @@ struct search
   // returns false, then it's okay to just provide the labels in
   // your subsequent call to predictLDF(), and skip the feature
   // values.
+  //
+  // predictNeedsReference does the same thing for whether the
+  // reference needs to be computed or not. (in case computing the
+  // reference is expensive.)
   bool   predictNeedsExample();
+  bool   predictNeedsReference();
 
   // get the value specified by --search_history_length
   uint32_t get_history_length();
@@ -164,6 +169,7 @@ struct search
 
   // set the number of learners
   void set_num_learners(size_t num_learners);
+  void set_num_learners(vector<bool>&); // |vec| = # of learners, vec[i] = is_ldf for learner i
 
   // get the action sequence from the test run (only run if test_only or -t or...)
   void get_test_action_sequence(vector<action>&);
@@ -177,18 +183,49 @@ struct search
   // pretty print a label
   std::string pretty_label(action a);
 
+  //////////////////////////////////////////////////
+  // some helper functions for LDF mode
+  //////////////////////////////////////////////////
+  // allocate some examples for LDF mode. you don't need to worry
+  // about freeing them later. they will be freed _after_ your
+  // "finish" method has run. if you call this more than once, it will
+  // cause a re-allocation, and all previous pointers will be
+  // invalidated. this will also be very slow. by default the labels
+  // will be i:0. for i starting at ZERO.
+  void ldf_alloc(size_t numExamples);
+
+  // how many ldf examples have been allocated?
+  size_t ldf_count();
+
+  // get the ith ldf example; returns nullptr if i >= ldf_count() if
+  // no argument (equivalent to i=0) then it returns a pointer to the
+  // first ldf example, which can be used as input to
+  // predictor.set_input
+  example* ldf_example(size_t i=0);
+
+  // helper function for adjusting the label on an ldf example
+  void ldf_set_label(size_t i, action a, float cost=0.);
+  action ldf_get_label(size_t i);
+  
+  //////////////////////////////////////////////////
   // for meta-tasks:
+  //////////////////////////////////////////////////
   BaseTask base_task(vector<example*>& ec) { return BaseTask(this, ec); }
 
+  
+  //////////////////////////////////////////////////
   // internal data that you don't get to see!
+  //////////////////////////////////////////////////
   search_private* priv;
-  void*           task_data;  // your task data!
   void*           metatask_data;  // your metatask data!
   const char*     task_name;
   const char*     metatask_name;
 
   vw& get_vw_pointer_unsafe();   // although you should rarely need this, some times you need a poiter to the vw data structure :(
   void set_force_oracle(bool force);  // if the library wants to force search to use the oracle, set this to true
+  void execute_set_options(uint32_t opts);
+  void  unsafe_set_task_data(void*);
+  void* unsafe_get_task_data();
 };
 
 // for defining new tasks, you must fill out a search_task
@@ -305,6 +342,7 @@ private:
   v_array<action> allowed_actions;   bool allowed_is_pointer;  // if we're pointing to your memory TRUE; if it's our own memory FALSE
   v_array<float> allowed_actions_cost;   bool allowed_cost_is_pointer;  // if we're pointing to your memory TRUE; if it's our own memory FALSE
   size_t learner_id;
+  int32_t skip_reduction_layer;
   search&sch;
 
   template<class T> void make_new_pointer(v_array<T>& A, size_t new_size);
