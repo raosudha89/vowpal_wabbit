@@ -2560,7 +2560,6 @@ base_learner* setup(vw&all)
   if ((priv.is_ldf || priv.is_mixed_ldf || priv.global_is_mixed_ldf) && (! args_has_ldf))
   { all.args.push_back("--csoaa_ldf");
     all.args.push_back("m");
-    cerr << "adding --csoaa_ldf m" << endl;
   }
 
   if (((!priv.is_ldf) || priv.global_is_mixed_ldf) && (! args_has_non_ldf))
@@ -2568,7 +2567,6 @@ base_learner* setup(vw&all)
     ss << vm["search"].as<size_t>();
     all.args.push_back("--csoaa");    
     all.args.push_back(ss.str());
-    cerr << "adding --csoaa " << ss.str() << endl;
   }
 
   base_learner* base = setup_base(all);
