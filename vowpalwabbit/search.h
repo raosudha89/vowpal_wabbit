@@ -48,8 +48,8 @@ public:
 struct search
 { // INTERFACE
   // for managing task-specific data that you want on the heap:
-  template<class T> void  set_task_data(T*data)           { task_data = data; }
-  template<class T> T*    get_task_data()                 { return (T*)task_data; }
+  template<class T> void  set_task_data(T*data) { unsafe_set_task_data((void*)data); }
+  template<class T> T*    get_task_data() { return (T*)unsafe_get_task_data(); }
 
   // for managing metatask-specific data
   template<class T> void  set_metatask_data(T*data)           { metatask_data = data; }
@@ -212,15 +212,15 @@ struct search
   // internal data that you don't get to see!
   //////////////////////////////////////////////////
   search_private* priv;
-  void*           task_data;  // your task data!
   void*           metatask_data;  // your metatask data!
   const char*     task_name;
   const char*     metatask_name;
 
-  // data for ldf examples
   vw& get_vw_pointer_unsafe();   // although you should rarely need this, some times you need a poiter to the vw data structure :(
   void set_force_oracle(bool force);  // if the library wants to force search to use the oracle, set this to true
   void execute_set_options(uint32_t opts);
+  void  unsafe_set_task_data(void*);
+  void* unsafe_get_task_data();
 };
 
 // for defining new tasks, you must fill out a search_task

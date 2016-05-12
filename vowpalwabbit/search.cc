@@ -122,11 +122,12 @@ struct multitask_item
   vector<bool>* learner_is_ldf;
   example* alloced_ldf_examples;
   size_t   alloced_ldf_examples_count;
+  void*    task_data;  // your task data!
   
   multitask_item(search_task* _task)
-      : task(_task), opts(0), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0)  {}
+      : task(_task), opts(0), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0), task_data(nullptr)  {}
   multitask_item(search_task* _task, uint32_t _opts)
-      : task(_task), opts(_opts), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0)  {}
+      : task(_task), opts(_opts), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0), task_data(nullptr)  {}
 };
   
 struct search_private
@@ -2066,8 +2067,6 @@ void search_initialize(vw* all, search& sch)
   priv.cache_hash_map.set_default_value(sa);
   priv.cache_hash_map.set_equivalent(cached_item_equivalent);
 
-  sch.task_data = nullptr;
-
   priv.empty_example = VW::alloc_examples(sizeof(CS::label), 1);
   CS::cs_label.default_label(&priv.empty_example->l.cs);
   priv.empty_example->in_use = true;
@@ -2084,7 +2083,8 @@ void search_initialize(vw* all, search& sch)
 }
 
 void finish_task(search& sch, multitask_item& task)
-{ if (task.task->finish) task.task->finish(sch);
+{ sch.priv->task = &task;
+  if (task.task->finish) task.task->finish(sch);
   if (task.learner_is_ldf != nullptr) delete task.learner_is_ldf;
   if (task.alloced_ldf_examples != nullptr)
   { for (size_t a=0; a<task.alloced_ldf_examples_count; a++)
@@ -2848,6 +2848,9 @@ action search::ldf_get_label(size_t i)
 vw& search::get_vw_pointer_unsafe() { return *this->priv->all; }
 void search::set_force_oracle(bool force) { this->priv->force_oracle = force; }
 
+void  search::unsafe_set_task_data(void*data) { priv->task->task_data = data; }
+void* search::unsafe_get_task_data()          { return priv->task->task_data; }
+  
 // predictor implementation
 predictor::predictor(search& sch, ptag my_tag) : is_ldf(false), my_tag(my_tag), ec(nullptr), ec_cnt(0), ec_alloced(false), weight(1.), oracle_is_pointer(false), allowed_is_pointer(false), allowed_cost_is_pointer(false), learner_id(0), sch(sch)
 { oracle_actions = v_init<action>();
