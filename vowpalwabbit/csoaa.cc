@@ -57,6 +57,8 @@ void predict_or_learn(csoaa& c, base_learner& base, example& ec)
   float score = FLT_MAX;
   size_t pt_start = ec.passthrough ? ec.passthrough->size() : 0;
   ec.l.simple = { 0., 0., 0. };
+  if (c.classificationesque)
+    ec.l.simple.label = 1.;
   if (ld.costs.size() > 0)
   { for (auto& cl : ld.costs)
       inner_loop<is_learn>(base, ec, cl.class_index, cl.x, prediction, score, cl.partial_prediction, c.classificationesque);
