@@ -32,7 +32,7 @@ namespace AMRParserTask
 {
 using namespace Search;
 
-const action SHIFT        = 1; //shift and make-concept
+const action SHIFT        = 1;
 const action REDUCE_RIGHT = 2;
 const action REDUCE_LEFT  = 3;
 const action SWAP	  = 4;
@@ -47,7 +47,7 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
 
   new_options(all, "AMR Parser Options")
   ("root_label", po::value<size_t>(&(data->root_label))->default_value(1), "Ensure that there is only one root in each sentence")
-  ("num_label", po::value<uint32_t>(&(data->num_label))->default_value(4), "Number of arc labels")
+  ("num_label", po::value<uint32_t>(&(data->num_label))->default_value(5), "Number of arc labels")
   ("one_learner", "Using one learner instead of three learners for labeled parser")
   ("cost_to_go", "Estimating cost-to-go matrix based on dynamic oracle rathan than rolling-out")
   ("old_style_labels", "Use old hack of label information");
@@ -83,13 +83,13 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
   all.pairs.swap(newpairs);
   all.triples.swap(newtriples);
 
-  for (v_string* i = all.interactions.begin; i != all.interactions.end; ++i)
-    i->delete_v();
+  for (v_string& i : all.interactions)
+    i.delete_v();
   all.interactions.erase();
-  for (vector<string>::const_iterator i = all.pairs.begin(); i != all.pairs.end(); ++i)
-    all.interactions.push_back(string2v_string(*i));
-  for (vector<string>::const_iterator i = all.triples.begin(); i != all.triples.end(); ++i)
-    all.interactions.push_back(string2v_string(*i));
+  for (string& i : all.pairs)
+    all.interactions.push_back(string2v_string(i));
+  for (string& i : all.triples)
+    all.interactions.push_back(string2v_string(i));
   if(data->cost_to_go)
     sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING | ACTION_COSTS);
   else
@@ -128,22 +128,17 @@ void inline add_feature(example& ex, uint64_t idx, unsigned char ns, uint64_t ma
 void add_all_features(example& ex, example& src, unsigned char tgt_ns, uint64_t mask, uint64_t multiplier, uint64_t offset, bool audit=false)
 {
   features& tgt_fs = ex.feature_space[tgt_ns];
-  for (unsigned char* ns = src.indices.begin; ns != src.indices.end; ++ns)
-    if(*ns != constant_namespace) // ignore constant_namespace
-      {
-        features& src_fs = src.feature_space[*ns];
-        for (size_t k=0; k<src_fs.indicies.size(); k++)
-          { uint64_t i = src_fs.indicies[k] / multiplier;
-            tgt_fs.push_back(1.0f, ((i + offset) * multiplier) & mask );
-          }
-      }
+  for (namespace_index ns : src.indices)
+    if(ns != constant_namespace) // ignore constant_namespace
+        for (feature_index i : src.feature_space[ns].indicies)
+            tgt_fs.push_back(1.0f, ((i / multiplier + offset) * multiplier) & mask );
 }
 
 void inline reset_ex(example *ex)
 { ex->num_features = 0;
   ex->total_sum_feat_sq = 0;
-  for(unsigned char *ns = ex->indices.begin; ns!=ex->indices.end; ns++)
-    ex->feature_space[(int)*ns].erase();
+  for (features& fs : *ex)
+    fs.erase();
 }
 
 // arc-hybrid System.
@@ -204,7 +199,7 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
 
   // feature based on the top three examples in stack ec_buf[0]: s1, ec_buf[1]: s2, ec_buf[2]: s3
   for(size_t i=0; i<3; i++)
-    ec_buf[i] = (stack.size()>i && *(stack.end-(i+1))!=0) ? ec[*(stack.end-(i+1))-1] : 0;
+    ec_buf[i] = (stack.size()>i && *(stack.end()-(i+1))!=0) ? ec[*(stack.end()-(i+1))-1] : 0;
 
   // features based on examples in string buffer ec_buf[3]: b1, ec_buf[4]: b2, ec_buf[5]: b3
   for(size_t i=3; i<6; i++)
@@ -218,7 +213,7 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
   // features based on leftmost children of the top element in bufer ec_buf[10]: bl1, ec_buf[11]: bl2
   for(size_t i=10; i<12; i++)
     ec_buf[i] = (idx <=n && children[i-8][idx]!=0) ? ec[children[i-8][idx]-1] : 0;
-  ec_buf[12] = (stack.size()>1 && *(stack.end-2)!=0 && children[2][*(stack.end-2)]!=0) ? ec[children[2][*(stack.end-2)]-1] : 0;
+  ec_buf[12] = (stack.size()>1 && *(stack.end()-2)!=0 && children[2][*(stack.end()-2)]!=0) ? ec[children[2][*(stack.end()-2)]-1] : 0;
 
   // unigram features
   for(size_t i=0; i<13; i++)
@@ -242,14 +237,14 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
 
   uint64_t additional_offset = val_namespace*offset_const;
   for(size_t j=0; j< 10; j++)
-  { 
-	additional_offset += j* 1023;
+  {
+    additional_offset += j* 1023;
     add_feature(ex, temp[j]+ additional_offset , val_namespace, mask, multiplier);
   }
   size_t count=0;
-  for (unsigned char* ns = data->ex->indices.begin; ns != data->ex->indices.end; ns++)
-    { data->ex->feature_space[(int)*ns].sum_feat_sq = (float) data->ex->feature_space[(int)*ns].size();
-      count+= data->ex->feature_space[(int)*ns].size();
+  for (features fs : *data->ex)
+    { fs.sum_feat_sq = (float) fs.size();
+      count+= fs.size();
     }
 
   size_t new_count;
@@ -402,8 +397,8 @@ void setup(Search::search& sch, vector<example*>& ec)
       tag  = label >> 8;
     }
     else
-    { head     = (costs.size() == 0) ? 0 : costs[0].class_index;
-      tag      = (costs.size() <= 1) ? (uint64_t)data->root_label : costs[1].class_index;
+    { head = (costs.size() == 0) ? 0 : costs[0].class_index;
+      tag  = (costs.size() <= 1) ? (uint64_t)data->root_label : costs[1].class_index;
       concept  = (costs.size() <= 2) ? 0 : costs[2].class_index;
     }
     if (tag > data->num_label)
@@ -431,8 +426,7 @@ void run(Search::search& sch, vector<example*>& ec)
   uint64_t n = (uint64_t) ec.size();
   stack.erase();
   //stack.push_back((data->root_label==0)?0:1);
-  //stack.push_back(1);
-  for(size_t i=0; i<6; i++) //what is 6 here?
+  for(size_t i=0; i<6; i++)
     for(size_t j=0; j<n+1; j++)
       data->children[i][j] = 0;
 
@@ -440,6 +434,7 @@ void run(Search::search& sch, vector<example*>& ec)
   uint32_t gold_concept = gold_concepts[idx];
   int count=1;
   size_t a_id = SHIFT;
+  Search::predictor P(sch, (ptag) 0);
   size_t t_id = Search::predictor(sch, (ptag) count)
                .set_input(*(data->ex))
                .set_oracle(gold_concept)
@@ -460,7 +455,7 @@ void run(Search::search& sch, vector<example*>& ec)
 
       if(cost_to_go)
       { get_cost_to_go_losses(sch, idx, n, gold_action_losses);
-        a_id= Search::predictor(sch, (ptag) count)
+        a_id= P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_allowed(gold_action_losses)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
@@ -488,7 +483,7 @@ void run(Search::search& sch, vector<example*>& ec)
             if(i!=data->root_label-1)
               valid_action_temp.push_back(i+2+num_label);
 
-        a_id = Search::predictor(sch, (ptag) count)
+        a_id = P.set_tag((ptag) count)
                .set_input(*(data->ex))
                .set_oracle(gold_action_temp)
                .set_allowed(valid_action_temp)
@@ -511,7 +506,7 @@ void run(Search::search& sch, vector<example*>& ec)
     else
     { if(cost_to_go)
       { get_cost_to_go_losses(sch, idx, n, gold_action_losses);
-        a_id= Search::predictor(sch, (ptag) count)
+        a_id= P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_allowed(gold_action_losses)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
@@ -520,7 +515,7 @@ void run(Search::search& sch, vector<example*>& ec)
       }
       else
       { get_gold_actions(sch, idx, n, gold_actions);
-        a_id= Search::predictor(sch, (ptag) count)
+        a_id= P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_actions)
               .set_allowed(valid_actions)
@@ -548,19 +543,20 @@ void run(Search::search& sch, vector<example*>& ec)
         { gold_action_losses.erase();
           for(size_t i=1; i<= data->num_label; i++)
             gold_action_losses.push_back(make_pair((action)i, i != gold_label));
-          t_id = Search::predictor(sch, (ptag) count)
+            t_id = Search::predictor(sch, (ptag) count)
                  .set_input(*(data->ex))
                  .set_allowed(gold_action_losses)
                  .set_condition_range(count-1, sch.get_history_length(), 'p')
-                 .set_learner_id(a_id)
+                 .set_learner_id(a_id-1)
                  .predict();
         }
         else
-        { t_id = Search::predictor(sch, (ptag) count)
+        { t_id = P.set_tag((ptag) count)
                  .set_input(*(data->ex))
                  .set_oracle(gold_label)
+                 .erase_alloweds()
                  .set_condition_range(count-1, sch.get_history_length(), 'p')
-                 .set_learner_id(a_id)
+                 .set_learner_id(a_id-1)
                  .predict();
         }
       }

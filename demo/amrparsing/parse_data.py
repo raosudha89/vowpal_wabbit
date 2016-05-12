@@ -1,4 +1,4 @@
-from sys import argv
+import sys
 
 concepts = {}
 def read_concepts():
@@ -13,8 +13,10 @@ def read_relations():
 if __name__ == '__main__':
 	read_concepts()
 	read_relations()
-	if len(argv) != 3:
+	argv = sys.argv
+	if len(argv) < 3:
 		print 'parse_data.py input output'
+		sys.exit(0)
 	data = open(argv[1]).readlines()
 	writer = open(argv[2],'w')
 	for line in data:
@@ -27,7 +29,6 @@ if __name__ == '__main__':
 		head = splits[3]			
 		relation = splits[4]
 		concept = splits[5]
-		strc = "|c %s"%concept
-		writer.write('%s %s %s %s:%s%s %s %s\n' % (int(head), relations[relation], concepts[concept], int(head), relation, strw, strp, strc))
+		writer.write('%s %s %s %s:%s%s %s\n' % (int(head), relations[relation], concepts[concept], int(head), relation, strw, strp))
 	writer.close()
 

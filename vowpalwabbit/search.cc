@@ -13,6 +13,7 @@ license as described in the file LICENSE.
 #include "search_sequencetask.h"
 #include "search_multiclasstask.h"
 #include "search_dep_parser.h"
+#include "search_amr_parser.h"
 #include "search_entityrelationtask.h"
 #include "search_hooktask.h"
 #include "search_graph.h"
@@ -40,6 +41,7 @@ search_task* all_tasks[] =
   &SequenceTask_DemoLDF::task,
   &MulticlassTask::task,
   &DepParserTask::task,
+  &AMRParserTask::task,
   &EntityRelationTask::task,
   &HookTask::task,
   &GraphTask::task,
