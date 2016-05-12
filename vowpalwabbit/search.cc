@@ -2563,10 +2563,13 @@ base_learner* setup(vw&all)
   if (priv.multitask)
   { bool some_ldf = false;
     bool some_non_ldf = false;
+    size_t max_num_actions = 1;
     for (multitask_item& task : *priv.multitask)
     { priv.task = &task;
+      size_t this_num_actions = 1;
       if (task.task->initialize)
-        task.task->initialize(sch, priv.A, vm);
+        task.task->initialize(sch, this_num_actions, vm);
+      if (this_num_actions > max_num_actions) max_num_actions = this_num_actions;
       if (priv.is_mixed_ldf) { some_ldf = true; some_non_ldf = true; }
       else if (priv.is_ldf)    some_ldf = true;
       else                     some_non_ldf = true;
@@ -2574,6 +2577,7 @@ base_learner* setup(vw&all)
     priv.task = nullptr;
     if (some_ldf && some_non_ldf)
       priv.global_is_mixed_ldf = true;
+    priv.A = max_num_actions;
   }
   if (priv.metatask && priv.metatask->initialize)
     priv.metatask->initialize(sch, priv.A, vm);
@@ -2586,7 +2590,7 @@ base_learner* setup(vw&all)
 
   if (((!priv.is_ldf) || priv.global_is_mixed_ldf) && (! args_has_non_ldf))
   { stringstream ss;
-    ss << vm["search"].as<size_t>();
+    ss << priv.A; // vm["search"].as<size_t>();
     all.args.push_back("--csoaa");    
     all.args.push_back(ss.str());
   }

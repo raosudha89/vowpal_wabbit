@@ -25,16 +25,23 @@ struct csoaa
 
 template<bool is_learn>
 inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
-                       uint32_t& prediction, float& score, float& partial_prediction, bool classificationesque)
+                       uint32_t& prediction, float& score, float& partial_prediction,
+                       bool classificationesque, polyprediction* pred, uint32_t num_classes)
 { if (is_learn)
-  {if (! classificationesque)
+  { if (! classificationesque)
     { ec.l.simple.label = cost;
       ec.weight = (cost == FLT_MAX) ? 0.f : 1.f;
     } else
     { ec.l.simple.label = (cost <= 0.) ? -1. : 1.;
       ec.weight = (cost == FLT_MAX) ? 0. : (cost <= 0.) ? 1. : cost;
     }
-    base.learn(ec, i-1);
+    if ((pred == nullptr) || (i < 1) || (i > num_classes) || (cost == FLT_MAX))
+      base.learn(ec, i-1);
+    else {
+      ec.partial_prediction = pred[i-1].scalar;
+      ec.pred.scalar = ec.partial_prediction;
+      base.update(ec, i-1);
+    }
   }
   else
     base.predict(ec, i-1);
@@ -44,10 +51,18 @@ inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
   { score = ec.partial_prediction;
     prediction = i;
   }
-  add_passthrough_feature(ec, i, ec.partial_prediction);
+  if (ec.passthrough) add_passthrough_feature(ec, i, ec.partial_prediction);
 }
 
 #define DO_MULTIPREDICT true
+
+bool maybe_do_multipredict(csoaa& c, base_learner& base, example& ec, COST_SENSITIVE::label& ld)
+{ if (! DO_MULTIPREDICT) return false;
+  if ((ld.costs.size() > 0) && (ld.costs.size() * 2 < c.num_classes)) return false;  // not worth doing multipredict
+  ec.l.simple = { FLT_MAX, 0., 0. };
+  base.multipredict(ec, 0, c.num_classes, c.pred, false);
+  return true;
+}
 
 template <bool is_learn>
 void predict_or_learn(csoaa& c, base_learner& base, example& ec)
@@ -57,18 +72,19 @@ void predict_or_learn(csoaa& c, base_learner& base, example& ec)
   float score = FLT_MAX;
   size_t pt_start = ec.passthrough ? ec.passthrough->size() : 0;
   ec.l.simple = { 0., 0., 0. };
-  if (c.classificationesque)
-    ec.l.simple.label = 1.;
+  
   if (ld.costs.size() > 0)
-  { for (auto& cl : ld.costs)
-      inner_loop<is_learn>(base, ec, cl.class_index, cl.x, prediction, score, cl.partial_prediction, c.classificationesque);
+  { bool predicted = maybe_do_multipredict(c, base, ec, ld);
+    for (auto& cl : ld.costs)
+      inner_loop<is_learn>(base, ec, cl.class_index, cl.x, prediction, score, cl.partial_prediction, c.classificationesque, predicted ? c.pred : nullptr, c.num_classes);
     ec.partial_prediction = score;
   }
   else if (DO_MULTIPREDICT && !is_learn)
   { ec.l.simple = { FLT_MAX, 0.f, 0.f };
     base.multipredict(ec, 0, c.num_classes, c.pred, false);
     for (uint32_t i = 1; i <= c.num_classes; i++)
-    { add_passthrough_feature(ec, i, c.pred[i-1].scalar);
+    { if (ec.passthrough)
+        add_passthrough_feature(ec, i, c.pred[i-1].scalar);
       if (c.pred[i-1].scalar < c.pred[prediction-1].scalar)
         prediction = i;
     }
@@ -77,7 +93,7 @@ void predict_or_learn(csoaa& c, base_learner& base, example& ec)
   else
   { float temp;
     for (uint32_t i = 1; i <= c.num_classes; i++)
-      inner_loop<false>(base, ec, i, FLT_MAX, prediction, score, temp, c.classificationesque);
+      inner_loop<false>(base, ec, i, FLT_MAX, prediction, score, temp, c.classificationesque, nullptr, c.num_classes);
   }
   if (ec.passthrough)
   { uint64_t second_best = 0;
