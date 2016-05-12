@@ -33,14 +33,11 @@ using namespace Search;
 const action SHIFT                = 1;
 const action REDUCE_RIGHT         = 2;
 const action REDUCE_LEFT          = 3;
-const action SWAP_REDUCE_RIGHT	  = 4;
-const action SWAP_REDUCE_LEFT 	  = 5;
-const action HALLUCINATE          = 6;
 
 void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
-  data->action_loss.resize(6);
+  data->action_loss.resize(4);
   data->ex = NULL;
   sch.set_task_data<task_data>(data);
 
@@ -60,7 +57,7 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
     data->ex->indices.push_back((unsigned char)i+'A');
   data->ex->indices.push_back(constant_namespace);
 
-  sch.set_num_learners(6);
+  sch.set_num_learners(3);
 
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
@@ -131,8 +128,6 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
   v_array<uint32_t> *children = data->children;
   if (a_id == SHIFT)
   { stack.push_back(idx);
-    concepts[idx] = t_id;
-    sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
     return idx+1;
   }
   else if (a_id == REDUCE_RIGHT)
@@ -160,43 +155,6 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
     stack.pop();
     return idx;
   }
-  else if (a_id == SWAP_REDUCE_RIGHT)
-  {
-    size_t last = stack.last();
-    stack.pop();
-    size_t second_last = stack.last();
-    stack.pop();
-    size_t third_last = stack.last();
-    stack.pop();
-    heads[last] = third_last;
-    children[5][third_last] = children[4][third_last];
-    children[4][third_last] = last;
-    children[1][third_last] ++;
-    tags[last] = t_id;
-    sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
-    stack.push_back(third_last);
-    stack.push_back(second_last);
-    return idx; 
-  }
-  else if (a_id == SWAP_REDUCE_LEFT)
-  {
-    size_t last = stack.last();
-    stack.pop();
-    size_t second_last = stack.last();
-    stack.pop();
-    heads[second_last] = idx;
-    children[3][idx] = children[2][idx];
-    children[2][idx] = second_last;
-    children[0][idx] ++;
-    tags[second_last] = t_id;
-    sch.loss(gold_heads[second_last] != heads[second_last] ? 2 : (gold_tags[second_last] != t_id) ? 1.f : 0.f);
-    stack.push_back(last);
-    return idx;
-  }
-  else if (a_id == HALLUCINATE)
-  {
-    
-  } 
   THROW("transition_hybrid failed");
 }
 
@@ -283,10 +241,6 @@ void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t 
     valid_action.push_back( REDUCE_RIGHT );
   if(stack_depth >=1 && state!=0 && idx<=n) // LEFT
     valid_action.push_back( REDUCE_LEFT );
-  if(stack_depth >=3)
-    valid_action.push_back( SWAP_REDUCE_RIGHT );
-  if(stack_depth >=2 && state!=0 && idx<=n)
-    valid_action.push_back( SWAP_REDUCE_LEFT);
 }
 
 bool is_valid(uint64_t action, v_array<uint32_t> valid_actions)
@@ -312,33 +266,22 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     return;
   }
 
-  size_t second_last = stack[size-2];
-  //if (is_valid(SWAP_REDUCE_LEFT,valid_actions) && gold_heads[second_last] == idx)
-  //{ gold_actions.push_back(SWAP_REDUCE_LEFT);
-  //  return;
-  //}
-
-  for(size_t i = 1; i<= 6; i++)
+  for(size_t i = 1; i<=3 ; i++)
     action_loss[i] = (is_valid(i,valid_actions))?0:100;
 
-  for(size_t i = 0; i<size-2; i++)
+  for(size_t i = 0; i<size-1; i++)
     if(idx <=n && (gold_heads[stack[i]] == idx || gold_heads[idx] == stack[i]))
       action_loss[SHIFT] += 1;
   if(size>0 && gold_heads[last] == idx)
     action_loss[SHIFT] += 1;
-  //if(size>0 && gold_heads[second_last] == idx)
-  //  action_loss[SHIFT] += 1;
 
   for(size_t i = idx+1; i<=n; i++)
     if(gold_heads[i] == last|| gold_heads[last] == i)
       action_loss[REDUCE_LEFT] +=1;
   if(size>0  && idx <=n && gold_heads[idx] == last)
     action_loss[REDUCE_LEFT] +=1;
-  if(size>=2 && gold_heads[last] == second_last) //i.e. we can't do REDUCE_RIGHT anymore 
+  if(size>=2 && gold_heads[last] == stack[size-2]) //i.e. we can't do REDUCE_RIGHT anymore 
     action_loss[REDUCE_LEFT] += 1;
-  //size_t third_last = stack[size-3];
-  //if(size>=3 && gold_heads[last] == third_last) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
-  //  action_loss[REDUCE_LEFT] += 1;
 
   if(gold_heads[last] >=idx)
     action_loss[REDUCE_RIGHT] +=1;
@@ -346,14 +289,6 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     if(gold_heads[i] == last)
       action_loss[REDUCE_RIGHT] +=1;
   
-  //for(size_t i=idx+1; i<=n; i++)
-  //  if(gold_heads[i] == second_last || gold_heads[second_last] == i)
-  //    action_loss[SWAP_REDUCE_LEFT] += 1;
-  //if(gold_heads[idx] == second_last)
-  //  action_loss[SWAP_REDUCE_LEFT] += 1;
-  //if(gold_heads[last] == idx)
-  //  action_loss[SWAP_REDUCE_LEFT] += 1; 
-
   // return the best actions
   size_t best_action = 1;
   size_t count = 0;
@@ -376,28 +311,22 @@ void setup(Search::search& sch, vector<example*>& ec)
   size_t n = ec.size();
   heads.resize(n+1);
   tags.resize(n+1);
-  concepts.resize(n+1);
   gold_heads.erase();
   gold_heads.push_back(0);
   gold_tags.erase();
   gold_tags.push_back(0);
-  gold_concepts.erase();
-  gold_concepts.push_back(0);
   for (size_t i=0; i<n; i++)
   { v_array<COST_SENSITIVE::wclass>& costs = ec[i]->l.cs.costs;
     size_t head,tag,concept;
     head = (costs.size() == 0) ? 0 : costs[0].class_index;
     tag  = (costs.size() <= 1) ? (uint64_t)data->root_label : costs[1].class_index;
-    concept  = (costs.size() <= 2) ? 0 : costs[2].class_index;
     if (tag > data->num_label)
       THROW("invalid label " << tag << " which is > num actions=" << data->num_label);
 
     gold_heads.push_back(head);
     gold_tags.push_back(tag);
-    gold_concepts.push_back(concept);
     heads[i+1] = 0;
     tags[i+1] = -1;
-    concepts[i+1] = 0;
   }
   for(size_t i=0; i<6; i++)
     data->children[i].resize(n+(size_t)1);
@@ -418,26 +347,6 @@ void run(Search::search& sch, vector<example*>& ec)
   size_t idx = ((data->root_label==0)?1:2);
   Search::predictor P(sch, (ptag) 0);
 
-  cout << stack.last();
-  //stack.erase();
-  //stack.push_back((data->root_label==0)?0:1);
-  //for(size_t i=0; i<6; i++)
-  //  for(size_t j=0; j<n+1; j++)
-  //    data->children[i][j] = 0;
-
-  //size_t idx = 1;  
-  //uint32_t gold_concept = gold_concepts[idx];
-  //int count=1;
-  //size_t a_id = SHIFT;
-  //Search::predictor P(sch, (ptag) 0);
-  //size_t t_id = Search::predictor(sch, (ptag) count)
-  //             .set_input(*(data->ex))
-  //             .set_oracle(gold_concept)
-  //             .set_condition_range(count-1, sch.get_history_length(), 'p')
-  //             .set_learner_id(a_id)
-  //             .predict();
-  //idx = transition_hybrid(sch, a_id, idx, t_id);
-  //count++;
   while(stack.size()>1 || idx <= n)
   { bool computedFeatures = false;
     if(sch.predictNeedsExample())
@@ -460,14 +369,7 @@ void run(Search::search& sch, vector<example*>& ec)
     count++;
 
     if (a_id == SHIFT)
-    { cout << stack.last();
-      uint32_t gold_concept = gold_concepts[stack.last()];
-      t_id = Search::predictor(sch, (ptag) count)
-             .set_input(*(data->ex))
-             .set_oracle(gold_concept)
-             .set_condition_range(count-1, sch.get_history_length(), 'p')
-             .set_learner_id(a_id)
-             .predict();
+    {
     }
     else if (a_id == REDUCE_LEFT or a_id == REDUCE_RIGHT)
     { if ((!computedFeatures) && sch.predictNeedsExample())
@@ -478,7 +380,7 @@ void run(Search::search& sch, vector<example*>& ec)
               .set_oracle(gold_label)
               .erase_alloweds()
               .set_condition_range(count-1, sch.get_history_length(), 'p')
-              .set_learner_id(a_id-1)
+              .set_learner_id(a_id)
               .predict();
     }
 
@@ -490,6 +392,6 @@ void run(Search::search& sch, vector<example*>& ec)
   sch.loss((gold_heads[stack.last()] != heads[stack.last()]));
   if (sch.output().good())
     for(size_t i=1; i<=n; i++)
-      sch.output() << (heads[i])<<":"<<tags[i] <<":"<<concepts[i] <<endl;
+      sch.output() << (heads[i])<<":"<<tags[i]<<endl;
 }
 }
