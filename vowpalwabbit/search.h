@@ -151,7 +151,12 @@ struct search
   // returns false, then it's okay to just provide the labels in
   // your subsequent call to predictLDF(), and skip the feature
   // values.
+  //
+  // predictNeedsReference does the same thing for whether the
+  // reference needs to be computed or not. (in case computing the
+  // reference is expensive.)
   bool   predictNeedsExample();
+  bool   predictNeedsReference();
 
   // get the value specified by --search_history_length
   uint32_t get_history_length();

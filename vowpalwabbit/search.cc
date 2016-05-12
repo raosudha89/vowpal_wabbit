@@ -1281,7 +1281,7 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
 }
 
 bool search_predictNeedsExample(search_private& priv)
-{ // this is basically copied from the logic of search_predict()
+{ // this is basically copied from the logic of search_predict
   switch (priv.state)
   { case INITIALIZE: return false;
     case GET_TRUTH_STRING: return false;
@@ -1305,6 +1305,30 @@ bool search_predictNeedsExample(search_private& priv)
   return (pol != -1);
 }
 
+
+bool search_predictNeedsReference(search_private& priv)
+{ // this is basically copied from the logic of search_predict
+  switch (priv.state)
+  { case INITIALIZE: return false;
+    case GET_TRUTH_STRING: return true;
+    case INIT_TEST:
+      return priv.force_oracle || priv.auto_hamming_loss;
+    case INIT_TRAIN:
+      // TODO: do we need to do something here for metatasks?
+      if (priv.auto_hamming_loss || (priv.rollout_method == NO_ROLLOUT)) return true;
+      break;
+    case LEARN:
+      if (priv.auto_hamming_loss) return true;
+      if (priv.t+priv.meta_t <= priv.learn_t) return false;  // TODO: in meta search mode with foreach feature we'll need it even here
+      // t > priv.learn_t
+      if ((priv.rollout_num_steps > 0) && (priv.loss_declared_cnt >= priv.rollout_num_steps)) return false; // skipping
+      break;
+  }
+
+  int pol = choose_policy(priv, false); // choose a policy but don't advance prng
+  return (pol == -1);
+}
+  
 void foreach_action_from_cache(search_private& priv, size_t t, action override_a=(action)-1)
 { cdbg << "foreach_action_from_cache: t=" << t << ", memo_foreach_action.size()=" << priv.memo_foreach_action.size() << ", override_a=" << override_a << endl;
   assert(t < priv.memo_foreach_action.size());
@@ -2681,7 +2705,8 @@ action search::predictLDF(example* ecs, size_t ec_cnt, ptag mytag, const action*
 
 void search::loss(float loss) { search_declare_loss(*this->priv, loss); }
 
-bool search::predictNeedsExample() { return search_predictNeedsExample(*this->priv); }
+bool search::predictNeedsExample()   { return search_predictNeedsExample(*this->priv); }
+bool search::predictNeedsReference() { return search_predictNeedsReference(*this->priv); }
 
 stringstream& search::output()
 { if      (!this->priv->should_produce_string    ) return *(this->priv->bad_string_stream);

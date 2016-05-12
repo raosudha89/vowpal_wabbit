@@ -24,7 +24,8 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
 void run(Search::search& sch, vector<example*>& ec)
 { Search::predictor P(sch, (ptag)0);
   for (size_t i=0; i<ec.size(); i++)
-  { action oracle     = ec[i]->l.multi.label;
+  { action oracle     = 0;
+    if (sch.predictNeedsReference()) oracle = ec[i]->l.multi.label;
     size_t prediction = P.set_tag((ptag)i+1).set_input(*ec[i]).set_oracle(oracle).set_condition_range((ptag)i, sch.get_history_length(), 'p').predict();
 
     if (sch.output().good())
