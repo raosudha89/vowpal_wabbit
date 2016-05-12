@@ -439,9 +439,11 @@ void run(Search::search& sch, vector<example*>& ec)
   //idx = transition_hybrid(sch, a_id, idx, t_id);
   //count++;
   while(stack.size()>1 || idx <= n)
-  { if(sch.predictNeedsExample())
-      extract_features(sch, idx, ec);
-    
+  { bool computedFeatures = false;
+    if(sch.predictNeedsExample())
+    { extract_features(sch, idx, ec);
+      computedFeatures = true;
+    }
     get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last());
     size_t a_id = 0, t_id = 0;
 
@@ -468,7 +470,9 @@ void run(Search::search& sch, vector<example*>& ec)
              .predict();
     }
     else if (a_id == REDUCE_LEFT or a_id == REDUCE_RIGHT)
-    { uint32_t gold_label = gold_tags[stack.last()];
+    { if ((!computedFeatures) && sch.predictNeedsExample())
+        extract_features(sch, idx, ec);
+      uint32_t gold_label = gold_tags[stack.last()];
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)

@@ -422,9 +422,11 @@ void run(Search::search& sch, vector<example*>& ec)
   size_t idx = ((data->root_label==0)?1:2);
   Search::predictor P(sch, (ptag) 0);
   while(stack.size()>1 || idx <= n)
-  { if(sch.predictNeedsExample())
-      extract_features(sch, idx, ec);
-
+  { bool computedFeatures = false;
+    if(sch.predictNeedsExample())
+    { extract_features(sch, idx, ec);
+      computedFeatures = true;
+    }
     get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last());
     size_t a_id = 0, t_id = 0;
 
@@ -506,7 +508,9 @@ void run(Search::search& sch, vector<example*>& ec)
       count++;
 
       if (a_id != SHIFT)
-      { uint32_t gold_label = gold_tags[stack.last()];
+      { if ((!computedFeatures) && sch.predictNeedsExample())
+          extract_features(sch, idx, ec);
+        uint32_t gold_label = gold_tags[stack.last()];
         if(cost_to_go)
         { gold_action_losses.erase();
           for(size_t i=1; i<= data->num_label; i++)
