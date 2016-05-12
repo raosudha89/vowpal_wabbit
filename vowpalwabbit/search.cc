@@ -2420,7 +2420,7 @@ base_learner* setup(vw&all)
 
   if (vm.count("search_force_oracle"))            priv.force_oracle         = true;
 
-  priv.A = vm["search"].as<size_t>();
+  priv.A = 1; // vm["search"].as<size_t>();
 
   string neighbor_features_string;
   check_option<string>(neighbor_features_string, all, vm, "search_neighbor_features", false, string_equal,
