@@ -1285,8 +1285,7 @@ bool search_predictNeedsExample(search_private& priv)
   switch (priv.state)
   { case INITIALIZE: return false;
     case GET_TRUTH_STRING: return false;
-    case INIT_TEST:
-      return true;
+    case INIT_TEST: return true;
     case INIT_TRAIN:
       // TODO: do we need to do something here for metatasks?
       //if (priv.beam && (priv.t < priv.beam_actions.size()))
@@ -1311,8 +1310,7 @@ bool search_predictNeedsReference(search_private& priv)
   switch (priv.state)
   { case INITIALIZE: return false;
     case GET_TRUTH_STRING: return true;
-    case INIT_TEST:
-      return priv.force_oracle || priv.auto_hamming_loss;
+    case INIT_TEST: return priv.force_oracle || priv.auto_hamming_loss;
     case INIT_TRAIN:
       // TODO: do we need to do something here for metatasks?
       if (priv.auto_hamming_loss || (priv.rollout_method == NO_ROLLOUT)) return true;
