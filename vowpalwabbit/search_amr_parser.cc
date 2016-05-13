@@ -128,6 +128,8 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
   v_array<uint32_t> *children = data->children;
   if (a_id == SHIFT)
   { stack.push_back(idx);
+    concepts[idx] = t_id;
+    sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
     return idx+1;
   }
   else if (a_id == REDUCE_RIGHT)
@@ -311,22 +313,28 @@ void setup(Search::search& sch, vector<example*>& ec)
   size_t n = ec.size();
   heads.resize(n+1);
   tags.resize(n+1);
+  concepts.resize(n+1);
   gold_heads.erase();
   gold_heads.push_back(0);
   gold_tags.erase();
   gold_tags.push_back(0);
+  gold_concepts.erase();
+  gold_concepts.push_back(0);
   for (size_t i=0; i<n; i++)
   { v_array<COST_SENSITIVE::wclass>& costs = ec[i]->l.cs.costs;
     size_t head,tag,concept;
     head = (costs.size() == 0) ? 0 : costs[0].class_index;
     tag  = (costs.size() <= 1) ? (uint64_t)data->root_label : costs[1].class_index;
+    concept  = (costs.size() <= 2) ? 0 : costs[2].class_index;
     if (tag > data->num_label)
       THROW("invalid label " << tag << " which is > num actions=" << data->num_label);
 
     gold_heads.push_back(head);
     gold_tags.push_back(tag);
+    gold_concepts.push_back(concept);
     heads[i+1] = 0;
     tags[i+1] = -1;
+    concepts[i+1] = 0;
   }
   for(size_t i=0; i<6; i++)
     data->children[i].resize(n+(size_t)1);
@@ -338,13 +346,15 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<action> &gold_actions = data->gold_actions;
   uint64_t n = (uint64_t) ec.size();
 
-  stack.push_back((data->root_label==0)?0:1);
+  //stack.push_back((data->root_label==0)?0:1);
+  stack.push_back(0);
   for(size_t i=0; i<6; i++)
     for(size_t j=0; j<n+1; j++)
       data->children[i][j] = 0;
 
   int count=1;
-  size_t idx = ((data->root_label==0)?1:2);
+  //size_t idx = ((data->root_label==0)?1:2);
+  size_t idx = 1;
   Search::predictor P(sch, (ptag) 0);
 
   while(stack.size()>1 || idx <= n)
@@ -369,7 +379,15 @@ void run(Search::search& sch, vector<example*>& ec)
     count++;
 
     if (a_id == SHIFT)
-    {
+    { if ((!computedFeatures) && sch.predictNeedsExample())
+        extract_features(sch, idx, ec);
+      uint32_t gold_concept = gold_concepts[idx]; 
+      t_id = Search::predictor(sch, (ptag) count)
+             .set_input(*(data->ex))
+             .set_oracle(gold_concept)
+             .set_condition_range(count-1, sch.get_history_length(), 'p')
+             .set_learner_id(a_id)
+             .predict();
     }
     else if (a_id == REDUCE_LEFT or a_id == REDUCE_RIGHT)
     { if ((!computedFeatures) && sch.predictNeedsExample())
@@ -392,6 +410,7 @@ void run(Search::search& sch, vector<example*>& ec)
   sch.loss((gold_heads[stack.last()] != heads[stack.last()]));
   if (sch.output().good())
     for(size_t i=1; i<=n; i++)
-      sch.output() << (heads[i])<<":"<<tags[i]<<endl;
+      //sch.output() << (heads[i])<<":"<<tags[i]<<":"<<concepts[i]<<endl;
+      sch.output() << (heads[i])<<tags[i]<<concepts[i]<<endl;
 }
 }
