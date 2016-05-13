@@ -2420,7 +2420,7 @@ base_learner* setup(vw&all)
 
   if (vm.count("search_force_oracle"))            priv.force_oracle         = true;
 
-  priv.A = 1; // vm["search"].as<size_t>();
+  priv.A = vm["search"].as<size_t>();
 
   string neighbor_features_string;
   check_option<string>(neighbor_features_string, all, vm, "search_neighbor_features", false, string_equal,
@@ -2566,7 +2566,7 @@ base_learner* setup(vw&all)
     size_t max_num_actions = 1;
     for (multitask_item& task : *priv.multitask)
     { priv.task = &task;
-      size_t this_num_actions = 1;
+      size_t this_num_actions = priv.A;
       if (task.task->initialize)
         task.task->initialize(sch, this_num_actions, vm);
       if (this_num_actions > max_num_actions) max_num_actions = this_num_actions;
