@@ -1,18 +1,3 @@
-Search for dependencies
--------------------------------------
+vowpalwabbit/vw --passes 100 -d demo/amrparsing/train_np.vw -k -c --search_rollin mix_per_roll --search_task amr_parser --search 12 --search_alpha 1e-5  --search_rollout oracle  --holdout_off --search_history_length 3 --search_no_caching -b 30 --root_label 1 --num_label 7 -f train_np.model
 
-This demo shows the performance of a dependency parser implemented in search
-framework. For more details, see
-
-http://arxiv.org/abs/1503.05615
-
-Note that due to the licence issue, we only provide a subset of English Penn 
-Treebank. If you have the full set of the data, please change the path in 
-Makefile accordingly.
-
-
-### Instruction ###
-
-- `make dep.perf`: 
-	downloads the subset of the English Penn Treebank corpus, trains a dependency parser, and computes test set statistics.
-
+vowpalwabbit/vw -i train_np.model -t -d demo/amrparsing/train_np.vw -p demo/amrparsing/train_np.pred
