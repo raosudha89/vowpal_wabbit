@@ -36,7 +36,7 @@ const action SHIFT        = 1;
 const action REDUCE_RIGHT = 2;
 const action REDUCE_LEFT  = 3;
 
-void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map& vm)
+void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
   data->action_loss.resize(4);
@@ -74,6 +74,8 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
   else
     sch.set_num_learners(3);
 
+  num_actions = (data->num_label > 3) ? data->num_label : 3;
+  
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
   vector<string> newpairs(pair, pair+19);
@@ -422,8 +424,11 @@ void run(Search::search& sch, vector<example*>& ec)
   size_t idx = ((data->root_label==0)?1:2);
   Search::predictor P(sch, (ptag) 0);
   while(stack.size()>1 || idx <= n)
-  { if(sch.predictNeedsExample())
-      extract_features(sch, idx, ec);
+  { bool extracted_features = false;
+    if(sch.predictNeedsExample())
+    { extract_features(sch, idx, ec);
+      extracted_features = true;
+    }
 
     get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last());
     size_t a_id = 0, t_id = 0;
@@ -506,7 +511,9 @@ void run(Search::search& sch, vector<example*>& ec)
       count++;
 
       if (a_id != SHIFT)
-      { uint32_t gold_label = gold_tags[stack.last()];
+      { if (! extracted_features) 
+          extract_features(sch, idx, ec);
+        uint32_t gold_label = gold_tags[stack.last()];
         if(cost_to_go)
         { gold_action_losses.erase();
           for(size_t i=1; i<= data->num_label; i++)
