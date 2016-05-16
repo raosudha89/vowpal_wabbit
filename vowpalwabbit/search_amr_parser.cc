@@ -35,6 +35,9 @@ const action REDUCE_RIGHT         = 2;
 const action REDUCE_LEFT          = 3;
 const action SWAP_REDUCE_RIGHT	  = 4;
 const action SWAP_REDUCE_LEFT 	  = 5;
+const int NULL_CONCEPT = 0;
+const int NO_HEAD = 0;
+const int NO_EDGE = 0;
 
 void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
@@ -59,7 +62,7 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
     data->ex->indices.push_back((unsigned char)i+'A');
   data->ex->indices.push_back(constant_namespace);
 
-  sch.set_num_learners(5);
+  sch.set_num_learners(6);
 
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
@@ -129,9 +132,20 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
   v_array<uint32_t> &heads=data->heads, &stack=data->stack, &gold_heads=data->gold_heads, &gold_tags=data->gold_tags, &tags = data->tags, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<uint32_t> *children = data->children;
   if (a_id == SHIFT)
-  { stack.push_back(idx);
-    concepts[idx] = t_id;
-    sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
+  { if(t_id == NULL_CONCEPT) 
+    { concepts[idx] = t_id;
+      heads[idx] = NO_HEAD;
+      tags[idx] = NO_EDGE;
+      sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
+      sch.loss(gold_heads[idx] != heads[idx] ? 1.f : 0.f);
+      sch.loss(gold_tags[idx] != tags[idx] ? 1.f : 0.f);
+    }
+    else 
+    { stack.push_back(idx);
+      concepts[idx] = t_id;
+      sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
+    }
+    
     return idx+1;
   }
   else if (a_id == REDUCE_RIGHT)
@@ -435,10 +449,10 @@ void run(Search::search& sch, vector<example*>& ec)
   Search::predictor P(sch, (ptag) 0);
 
   while(stack.size()>1 || idx <= n)
-  { bool computedFeatures = false;
+  { bool extracted_features = false;
     if(sch.predictNeedsExample())
     { extract_features(sch, idx, ec);
-      computedFeatures = true;
+      extracted_features = true;
     }
     get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last());
     size_t a_id = 0, t_id = 0;
@@ -454,7 +468,7 @@ void run(Search::search& sch, vector<example*>& ec)
 
     // Predict the next action {SHIFT, REDUCE_LEFT, REDUCE_RIGHT}
     count++;
-    if ((!computedFeatures) && sch.predictNeedsExample())
+    if ((!extracted_features) && sch.predictNeedsExample())
       extract_features(sch, idx, ec);
 
     if (a_id == SHIFT)
@@ -495,7 +509,7 @@ void run(Search::search& sch, vector<example*>& ec)
   sch.loss((gold_heads[stack.last()] != heads[stack.last()]));
   if (sch.output().good())
     for(size_t i=1; i<=n; i++)
-      //sch.output() << (heads[i])<<":"<<tags[i]<<":"<<concepts[i]<<endl;
-      sch.output() << (heads[i])<<tags[i]<<concepts[i]<<endl;
+      sch.output() << (heads[i])<<":"<<tags[i]<<":"<<concepts[i]<<endl;
+      //sch.output() << (heads[i])<<tags[i]<<concepts[i]<<endl;
 }
 }

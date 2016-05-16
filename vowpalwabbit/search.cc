@@ -117,6 +117,8 @@ struct action_cache
 };
 std::ostream& operator << (std::ostream& os, const action_cache& x) { os << x.k << ':' << x.cost; if (x.is_opt) os << '*'; return os; }
 
+bool mc_label_is_test(polylabel& lab) { return MC::label_is_test(&lab.multi); }
+  
 struct multitask_item
 { search_task* task;
   uint32_t opts;
@@ -125,11 +127,14 @@ struct multitask_item
   example* alloced_ldf_examples;
   size_t   alloced_ldf_examples_count;
   void*    task_data;  // your task data!
+  bool (*label_is_test)(polylabel&); // tell me if the label data from an example is test
+  label_parser* desired_label_parser;
+  size_t num_actions;
   
   multitask_item(search_task* _task)
-      : task(_task), opts(0), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0), task_data(nullptr)  {}
+      : task(_task), opts(0), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0), task_data(nullptr), label_is_test(mc_label_is_test), desired_label_parser(&MC::mc_label), num_actions(1) {}
   multitask_item(search_task* _task, uint32_t _opts)
-      : task(_task), opts(_opts), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0), task_data(nullptr)  {}
+      : task(_task), opts(_opts), num_learners(1), learner_is_ldf(nullptr), alloced_ldf_examples(nullptr), alloced_ldf_examples_count(0), task_data(nullptr), label_is_test(&mc_label_is_test), desired_label_parser(&MC::mc_label), num_actions(1) {}
 };
   
 struct search_private
@@ -157,8 +162,6 @@ struct search_private
   bool global_no_caching;      // if command line says no caching, then DEFINITELY don't cache
   size_t rollout_num_steps;      // how many calls of "loss" before we stop really predicting on rollouts and switch to oracle (0 means "infinite")
   bool linear_ordering;          // insist that examples are generated in linear order (rather that the default hoopla permutation)
-  bool (*label_is_test)(polylabel&); // tell me if the label data from an example is test
-  label_parser* desired_label_parser;
 
   size_t t;                      // current search step
   size_t T;                      // length of root trajectory
@@ -268,6 +271,44 @@ struct search_private
 string   audit_feature_space("conditional");
 uint64_t conditional_constant = 8290743;
 
+void convert_label(label_parser& from, label_parser& to, polylabel& ld)
+{ if (from == to) return;
+  if ((from == MC::mc_label) && (to == CS::cs_label)) {
+    CS::wclass wc = { ld.multi.weight, ld.multi.label, 0., 0. };
+    ld.cs.costs = v_init<CS::wclass>();
+    CS::cs_label.default_label(&ld);
+    ld.cs.costs.push_back(wc);
+    return;
+  }
+  if ((from == CS::cs_label) && (to == MC::mc_label)) {
+    if (ld.cs.costs.size() >= 2)
+      THROW("cannot convert CS -> MC when |costs| >= 2");
+    float weight = 0.;
+    uint32_t label = 1;
+    if (ld.cs.costs.size() > 0)
+    { weight = ld.cs.costs[0].x;
+      label  = ld.cs.costs[0].class_index;
+    }
+    ld.cs.costs.delete_v();
+    ld.multi = { label, weight };
+    return;
+  }
+  THROW("don't know how to convert between these two label types!");
+}
+
+string label_parser_name(label_parser& a)
+{ if (a == MC::mc_label) return "mc";
+  if (a == CS::cs_label) return "cs";
+  return "Unk";
+}
+  
+label_parser& unify_label_parser(label_parser& a, label_parser& b)
+{ if (a == b) return a;
+  if ((a == MC::mc_label) && (b == CS::cs_label)) return b;
+  if ((b == MC::mc_label) && (a == CS::cs_label)) return a;
+  THROW("don't know how to compare these two label types!");
+}
+  
 void clear_memo_foreach_action(search_private& priv)
 { for (size_t i=0; i<priv.memo_foreach_action.size(); i++)
     if (priv.memo_foreach_action[i])
@@ -414,6 +455,7 @@ void number_to_natural(size_t big, char* c)
 
 void print_update(search_private& priv)
 { vw& all = *priv.all;
+
   if (!priv.printed_output_header && !all.quiet)
   { const char * header_fmt = "%-10s %-10s %8s%24s %22s %5s %5s  %7s  %7s  %7s  %-8s\n";
     fprintf(stderr, header_fmt, "average", "since", "instance", "current true",  "current predicted", "cur",  "cur", "predic", "cache", "examples", "");
@@ -606,7 +648,6 @@ void search_declare_loss(search_private& priv, float loss)
 
 
 template<class T> void cdbg_print_array(string str, v_array<T>& A) { cdbg << str << " = ["; for (size_t i=0; i<A.size(); i++) cdbg << " " << A[i]; cdbg << " ]" << endl; }
-template<class T> void cerr_print_array(string str, v_array<T>& A) { std::cerr << str << " = ["; for (size_t i=0; i<A.size(); i++) std::cerr << " " << A[i]; std::cerr << " ]" << endl; }
 
 
 size_t random(size_t max) { return (size_t)(frand48() * (float)max); }
@@ -1834,7 +1875,7 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
       cdbg << "-------------------------------------------------------------------------------------" << endl;
       cdbg << "learn_t = " << priv.learn_t << ", learn_a_idx = " << priv.learn_a_idx << endl;
       run_task(sch, priv.ec_seq);
-      //cerr_print_array("in GENER, learn_allowed_actions", priv.learn_allowed_actions);
+      //cdbg_print_array("in GENER, learn_allowed_actions", priv.learn_allowed_actions);
       float this_loss = priv.learn_loss;
       cs_cost_push_back(priv.cb_learner, priv.learn_losses, priv.is_ldf ? (uint32_t)(priv.learn_a_idx - 1) : (uint32_t)priv.learn_a_idx, this_loss);
       //                          (priv.learn_allowed_actions.size() > 0) ? priv.learn_allowed_actions[priv.learn_a_idx-1] : priv.is_ldf ? (priv.learn_a_idx-1) : (priv.learn_a_idx),
@@ -1877,7 +1918,7 @@ void do_actual_learning_known_task(vw&all, search& sch)
   bool is_test_ex = false;
   bool is_holdout_ex = false;
   for (size_t i=0; i<priv.ec_seq.size(); i++)
-  { is_test_ex |= priv.label_is_test(priv.ec_seq[i]->l);
+  { is_test_ex |= priv.task->label_is_test(priv.ec_seq[i]->l);
     is_holdout_ex |= priv.ec_seq[i]->test_only;
     if (is_test_ex && is_holdout_ex) break;
   }
@@ -1905,18 +1946,21 @@ void do_actual_learning_known_task(vw&all, search& sch)
   if (priv.task->task->run_takedown) priv.task->task->run_takedown(sch, priv.ec_seq);
 }
 
-int32_t get_multitask_id(example& ec)
+int32_t get_multitask_id(vector<example*>& ec_seq)
 { // specify task with an example like "|task :5" meaning task = 5
+  cdbg << "get_multitask_id ec_seq.size=" << ec_seq.size() << endl;
+  if (ec_seq.size() != 1) return -6;
+  example& ec = *ec_seq[0];
   if (ec.indices.size() >  2) return -1; // at most you should have constant namespace and task namespace
-  if (ec.indices.size() == 0) return -1; // need at least one namespace
+  if (ec.indices.size() == 0) return -2; // need at least one namespace
   if ((ec.indices[0] != 't') &&
-      ((ec.indices.size() == 1) || (ec.indices[1] != 't'))) return -1;
+      ((ec.indices.size() == 1) || (ec.indices[1] != 't'))) return -3;
   // we have the right namespace, now get the task id
   features& feats = ec.feature_space['t'];
-  if (feats.values.size() != 1) return -1;
+  if (feats.values.size() != 1) return -4;
   int32_t task = (int32_t) feats.values[0];
   float recovered_float = (float)task;
-  if (fabs(recovered_float - feats.values[0]) > 0.01) return -1;
+  if (fabs(recovered_float - feats.values[0]) > 0.01) return -5;
   return task;
 }
 
@@ -1925,10 +1969,10 @@ void set_multitask_id(search&sch, search_private& priv, int32_t task_id)
   priv.current_task = task_id;
   sch.execute_set_options(priv.task->opts);
   priv.learner_id_offset = 0;
+  priv.A = priv.task->num_actions;
   for (int32_t i=0; i<task_id; i++) priv.learner_id_offset += priv.multitask->get(i).num_learners;
   cdbg << "set_multitask_id set to " << task_id << ", learner_id_offset=" << priv.learner_id_offset << endl;
 }
-
   
 template <bool is_learn>
 void do_actual_learning(vw&all, search& sch)  // first, might need to figure out which task we're doing!
@@ -1941,25 +1985,33 @@ void do_actual_learning(vw&all, search& sch)  // first, might need to figure out
     do_actual_learning_known_task<is_learn>(all, sch);
   else
   { // we need to inspect the first example to see which task this is
-    int32_t task_id = get_multitask_id(*priv.ec_seq[0]);
-    if (task_id <= 0)
-    { std::cerr << "warning: malformed task id example at " << priv.ec_seq[0]->example_counter << "; treating as task 1" << std::endl;
-      task_id = 1;
-      assert(false);
-    }
-    if (task_id > priv.multitask->size())
-    { std::cerr << "warning: unknown task id " << task_id << " at " << priv.ec_seq[0]->example_counter << "; ignoring" << std::endl;
+    int32_t task_id = get_multitask_id(priv.ec_seq);
+    if (task_id > 0)
+    { if (task_id > priv.multitask->size())
+      { std::cerr << "warning: unknown task id " << task_id << " at " << priv.ec_seq[0]->example_counter << "; setting task 1" << std::endl;
+        task_id = 1;
+      }
+      set_multitask_id(sch, priv, task_id-1);
       return;
+    } else
+      cdbg << "actual example, task_id=" << task_id << endl;
+    // actual example
+    cdbg << "calling do_actual_learning_known_task on " << priv.ec_seq.size() << " examples" << endl;
+    bool converted = false;
+    if (! (*priv.task->desired_label_parser == priv.all->p->lp))
+    { cdbg << "converting labels from " << label_parser_name(priv.all->p->lp) << " to " << label_parser_name(*priv.task->desired_label_parser) << "!" << endl;
+      for (example* ec : priv.ec_seq)
+        convert_label(priv.all->p->lp, *priv.task->desired_label_parser, ec->l);
+      converted = true;
     }
-    assert(priv.task == nullptr);
-    set_multitask_id(sch, priv, task_id-1);
-    vector<example*> old_ec_seq;
-    for (example* ec : priv.ec_seq) old_ec_seq.push_back(ec);
-    priv.ec_seq.clear();
-    for (size_t n=1; n<old_ec_seq.size(); n++) priv.ec_seq.push_back(old_ec_seq[n]);
+      
     do_actual_learning_known_task<is_learn>(all, sch);
-    priv.ec_seq = old_ec_seq;
-    priv.task = nullptr;
+
+    if (converted)
+    { cdbg << "unconverting labels from " << label_parser_name(*priv.task->desired_label_parser) << " to " << label_parser_name(priv.all->p->lp) << "!" << endl;
+      for (example* ec : priv.ec_seq)
+        convert_label(*priv.task->desired_label_parser, priv.all->p->lp, ec->l);
+    }
   }
 }
 
@@ -2024,7 +2076,8 @@ void end_pass(search& sch)
 
 void finish_example(vw& all, search& sch, example& ec)
 { if (ec.end_pass || example_is_newline(ec) || sch.priv->ec_seq.size() >= all.p->ring_size - 2)
-  { print_update(*sch.priv);
+  { if ((sch.priv->multitask == nullptr) || (get_multitask_id(sch.priv->ec_seq) < 0))
+      print_update(*sch.priv);
     VW::finish_example(all, &ec);
     clear_seq(all, *sch.priv);
   }
@@ -2048,15 +2101,9 @@ void end_examples(search& sch)
   }
 }
 
-bool mc_label_is_test(polylabel& lab)
-{ return MC::label_is_test(&lab.multi);
-}
-
 void search_initialize(vw* all, search& sch)
 { search_private& priv = *sch.priv;//priv is zero initialized by default
   priv.all = all;
-
-  priv.label_is_test = mc_label_is_test;
 
   priv.A = 1;
   priv.total_num_learners = 1;
@@ -2098,6 +2145,8 @@ void search_initialize(vw* all, search& sch)
 
   priv.current_task = 0;
   priv.task = nullptr;
+
+  priv.all->p->lp = MC::mc_label;
   
   new (&priv.rawOutputString) string();
   priv.rawOutputStringStream = new stringstream(priv.rawOutputString);
@@ -2422,7 +2471,7 @@ base_learner* setup(vw&all)
 
   if (vm.count("search_force_oracle"))            priv.force_oracle         = true;
 
-  priv.A = 1; // vm["search"].as<size_t>();
+  priv.A = vm["search"].as<size_t>();
 
   string neighbor_features_string;
   check_option<string>(neighbor_features_string, all, vm, "search_neighbor_features", false, string_equal,
@@ -2560,21 +2609,29 @@ base_learner* setup(vw&all)
    // default to OAA labels unless the task wants to override this (which they can do in initialize)
   assert( (priv.task == nullptr) || (priv.multitask == nullptr) );
   assert( (priv.task != nullptr) || (priv.multitask != nullptr) );
+  label_parser unified_lp = MC::mc_label;
   if (priv.task && priv.task->task->initialize)
-    priv.task->task->initialize(sch, priv.A, vm);
+  { priv.task->task->initialize(sch, priv.A, vm);
+    unified_lp = *priv.task->desired_label_parser;
+  }
   if (priv.multitask)
   { bool some_ldf = false;
     bool some_non_ldf = false;
     size_t max_num_actions = 1;
     for (multitask_item& task : *priv.multitask)
     { priv.task = &task;
-      size_t this_num_actions = 1;
+      task.num_actions = priv.A;
       if (task.task->initialize)
-        task.task->initialize(sch, this_num_actions, vm);
-      if (this_num_actions > max_num_actions) max_num_actions = this_num_actions;
+        task.task->initialize(sch, task.num_actions, vm);
+      
+      if (task.num_actions > max_num_actions) max_num_actions = task.num_actions;
+      
       if (priv.is_mixed_ldf) { some_ldf = true; some_non_ldf = true; }
       else if (priv.is_ldf)    some_ldf = true;
       else                     some_non_ldf = true;
+
+      cdbg << "unify_label_parser(" << label_parser_name(*task.desired_label_parser) << ", " << label_parser_name(unified_lp) << ")" << endl;
+      unified_lp = unify_label_parser(*task.desired_label_parser, unified_lp);
     }
     priv.task = nullptr;
     if (some_ldf && some_non_ldf)
@@ -2598,7 +2655,9 @@ base_learner* setup(vw&all)
   }
 
   base_learner* base = setup_base(all);
-  all.p->lp = (priv.desired_label_parser == nullptr) ? MC::mc_label : *priv.desired_label_parser;
+
+  priv.all->p->lp = unified_lp;
+  cdbg << "p->lp = " << label_parser_name(priv.all->p->lp) << endl;
   
   if (vm.count("search_allowed_transitions"))     read_allowed_transitions((action)priv.A, vm["search_allowed_transitions"].as<string>().c_str());
 
@@ -2753,11 +2812,9 @@ void  search::set_options(uint32_t opts)
 void search::set_label_parser(label_parser&lp, bool (*is_test)(polylabel&))
 { if (this->priv->all->vw_is_main && (this->priv->state != INITIALIZE))
     std::cerr << "warning: task should not set label parser except in initialize function!" << endl;
-  //this->priv->all->p->lp = lp;
-  if (this->priv->desired_label_parser != nullptr)
-    THROW("duplicate calls to set_label_parser disallowed; perhaps two different tasks want different parsers?");
-  this->priv->desired_label_parser = &lp;
-  this->priv->label_is_test = is_test;
+  cdbg << "set_label_parser(" << label_parser_name(lp) << ")" << endl;
+  this->priv->task->desired_label_parser = &lp;
+  this->priv->task->label_is_test = is_test;
 }
 
 void search::get_test_action_sequence(vector<action>& V)
@@ -2774,7 +2831,7 @@ void search::set_num_learners(size_t num_learners)
     this->priv->task->learner_is_ldf = nullptr;
   }
 }
-void search::set_num_learners(vector<bool>& learner_is_ldf)
+  void search::set_num_learners(std::initializer_list<bool> learner_is_ldf)
 { this->priv->task->num_learners = learner_is_ldf.size();
   if (this->priv->task->learner_is_ldf != nullptr) delete this->priv->task->learner_is_ldf;
   this->priv->task->learner_is_ldf = new vector<bool>(); // TODO: check consistency in mixed_ldf and learner_is_ldf

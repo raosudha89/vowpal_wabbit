@@ -4,6 +4,7 @@ individual contributors. All rights reserved.  Released under a BSD
 license as described in the file LICENSE.
 */
 #pragma once
+#include <initializer_list>
 #include "global_data.h"
 
 #define cdbg clog
@@ -169,7 +170,7 @@ struct search
 
   // set the number of learners
   void set_num_learners(size_t num_learners);
-  void set_num_learners(vector<bool>&); // |vec| = # of learners, vec[i] = is_ldf for learner i
+  void set_num_learners(std::initializer_list<bool>); // |vec| = # of learners, vec[i] = is_ldf for learner i
 
   // get the action sequence from the test run (only run if test_only or -t or...)
   void get_test_action_sequence(vector<action>&);

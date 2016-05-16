@@ -18,11 +18,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& /*v
                    Search::IS_MIXED_LDF             |    // we have multiple learners, some are ldf
                    0);
   sch.ldf_alloc(num_actions);
-  
-  vector<bool> is_ldf_vec;
-  is_ldf_vec.push_back(false);
-  is_ldf_vec.push_back(true);
-  sch.set_num_learners(is_ldf_vec);
+  sch.set_num_learners( { false, true } ); // 2 learners, first is non-ldf, second is ldf
 }
 
 // this is totally bogus for the example -- you'd never actually do this!
