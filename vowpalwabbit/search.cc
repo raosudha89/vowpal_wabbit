@@ -264,6 +264,7 @@ struct search_private
 
   v_array<multitask_item>* multitask; // if you're doing MTL, then we keep track of each task individually
   size_t current_task;
+  size_t only_do_task;
 };
 
 string   audit_feature_space("conditional");
@@ -534,9 +535,9 @@ void add_new_feature(search_private& priv, float val, uint64_t idx)
 void del_features_in_top_namespace(search_private& priv, example& ec, size_t ns)
 { if ((ec.indices.size() == 0) || (ec.indices.last() != ns))
   { if (ec.indices.size() == 0)
-      { THROW("internal error (bug): expecting top namespace to be '" << ns << "' but it was empty"); }
+    { assert(false); THROW("internal error (bug): expecting top namespace to be '" << ns << "' but it was empty"); }
     else
-      { THROW("internal error (bug): expecting top namespace to be '" << ns << "' but it was " << (size_t)ec.indices.last()); }
+    { assert(false); THROW("internal error (bug): expecting top namespace to be '" << ns << "' but it was " << (size_t)ec.indices.last()); }
   }
   features& fs = ec.feature_space[ns];
   ec.indices.decr();
@@ -551,9 +552,11 @@ void add_neighbor_features(search_private& priv)
 
   for (size_t n=0; n<priv.ec_seq.size(); n++)    // iterate over every example in the sequence
   { example& me = *priv.ec_seq[n];
+    cdbg << "adding neighbor features to " << n << ":" << endl;
     for (size_t n_id=0; n_id < priv.neighbor_features.size(); n_id++)
     { int32_t offset = priv.neighbor_features[n_id] >> 24;
       size_t  ns     = priv.neighbor_features[n_id] & 0xFF;
+      cdbg << "\t" << ns << " @ " << offset << endl;
 
       priv.dat_new_feature_ec = &me;
       priv.dat_new_feature_value = 1.;
@@ -579,7 +582,7 @@ void add_neighbor_features(search_private& priv)
 
     features& fs = me.feature_space[neighbor_namespace];
     size_t sz = fs.size();
-    if ((sz > 0) && (fs.sum_feat_sq > 0.))
+    if (true || ((sz > 0) && (fs.sum_feat_sq > 0.)))
       { me.indices.push_back(neighbor_namespace);
         me.total_sum_feat_sq += fs.sum_feat_sq;
         me.num_features += sz;
@@ -592,7 +595,9 @@ void add_neighbor_features(search_private& priv)
 void del_neighbor_features(search_private& priv)
 { if (priv.neighbor_features.size() == 0) return;
   for (size_t n=0; n<priv.ec_seq.size(); n++)
+  { cdbg << "removing neighbor features from " << n << endl;
     del_features_in_top_namespace(priv, *priv.ec_seq[n], neighbor_namespace);
+  }
 }
 
 void reset_search_structure(search_private& priv)
@@ -1994,22 +1999,25 @@ void do_actual_learning(vw&all, search& sch)  // first, might need to figure out
     } else
       cdbg << "actual example, task_id=" << task_id << endl;
     // actual example
-    cdbg << "calling do_actual_learning_known_task on " << priv.ec_seq.size() << " examples" << endl;
-    bool converted = false;
-    if (! (*priv.task->desired_label_parser == priv.all->p->lp))
-    { cdbg << "converting labels from " << label_parser_name(priv.all->p->lp) << " to " << label_parser_name(*priv.task->desired_label_parser) << "!" << endl;
-      for (example* ec : priv.ec_seq)
-        convert_label(priv.all->p->lp, *priv.task->desired_label_parser, ec->l);
-      converted = true;
-    }
+    if ((priv.only_do_task == 0) || (priv.current_task + 1 == priv.only_do_task)) {
+      cdbg << "calling do_actual_learning_known_task on " << priv.ec_seq.size() << " examples" << endl;
+      bool converted = false;
+      if (! (*priv.task->desired_label_parser == priv.all->p->lp))
+      { cdbg << "converting labels from " << label_parser_name(priv.all->p->lp) << " to " << label_parser_name(*priv.task->desired_label_parser) << "!" << endl;
+        for (example* ec : priv.ec_seq)
+          convert_label(priv.all->p->lp, *priv.task->desired_label_parser, ec->l);
+        converted = true;
+      }
       
-    do_actual_learning_known_task<is_learn>(all, sch);
+      do_actual_learning_known_task<is_learn>(all, sch);
 
-    if (converted)
-    { cdbg << "unconverting labels from " << label_parser_name(*priv.task->desired_label_parser) << " to " << label_parser_name(priv.all->p->lp) << "!" << endl;
-      for (example* ec : priv.ec_seq)
-        convert_label(*priv.task->desired_label_parser, priv.all->p->lp, ec->l);
-    }
+      if (converted)
+      { cdbg << "unconverting labels from " << label_parser_name(*priv.task->desired_label_parser) << " to " << label_parser_name(priv.all->p->lp) << "!" << endl;
+        for (example* ec : priv.ec_seq)
+          convert_label(*priv.task->desired_label_parser, priv.all->p->lp, ec->l);
+      }
+    } else
+      cdbg << "skipping do_actual_learning_known_task because not the right task" << endl;
   }
 }
 
@@ -2421,6 +2429,7 @@ base_learner* setup(vw&all)
   ("search_xv",                                     "train two separate policies, alternating prediction/learning")
   ("search_perturb_oracle",    po::value<float>(),  "perturb the oracle on rollin with this probability (def: 0)")
   ("search_linear_ordering",                        "insist on generating examples in linear order (def: hoopla permutation)")
+  ("search_only_task",         po::value<size_t>(), "only learn this specific task (def: 0 = learn all tasks)")
   ;
   add_options(all);
   po::variables_map& vm = all.vm;
@@ -2459,6 +2468,7 @@ base_learner* setup(vw&all)
   if (vm.count("search_xv"))                      priv.xv       = true;
   if (vm.count("search_perturb_oracle"))          priv.perturb_oracle       = vm["search_perturb_oracle"].as<float>();
   if (vm.count("search_linear_ordering"))         priv.linear_ordering      = true;
+  if (vm.count("search_only_task"))               priv.only_do_task         = vm["search_only_task"].as<size_t>();
 
   if (vm.count("search_alpha"))                   priv.alpha                = vm["search_alpha"            ].as<float>();
   if (vm.count("search_beta"))                    priv.beta                 = vm["search_beta"             ].as<float>();
