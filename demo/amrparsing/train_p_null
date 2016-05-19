@@ -1,0 +1,6 @@
+1	The		DT	0	NOEDGE		null
+2	boy		NN	3	ARG0		boy	
+3	wants		VB	0	ROOT		want-01
+4	to		PP	0	NOEDGE		null
+5	go		VB	3	ARG1		go-01
+

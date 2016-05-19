@@ -1,7 +1,10 @@
-1	glance		NN	2	MANNER		glance-01
-2	I		PP	4	ARG0		i
-3	can		MD	0	ROOT		possible
-4	distinguish	VB	3	DOMAIN		distinguish-01
-5	China		NN	4	ARG1		china
-6	Arizona		NN	4	ARG2		arizona
+1	Hallmark	DT	3	ARG0		hallmark	
+2	could		MD	0	ROOT		possible
+3	make		VB	2	ARG1		make-01
+4	a		DT	0	NOEDGE		null
+5	fortune		NN	3	ARG1		fortune
+6	off		PP	0	NOEDGE		null
+7	of		PP	0	NOEDGE		null
+8	this		PP	9	MOD		this
+9	guy		NN	5	SOURCE		guy
 

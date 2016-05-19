@@ -41,6 +41,7 @@ const int NUM_LEARNERS = 6;
 const int NULL_CONCEPT = 0; //this is not predicted and hence can be 0
 const int NO_HEAD = 0; //this is not predicted and hence can be 0
 const int NO_EDGE = 0; //this is not predicted and hence can be 0
+const int ROOT = 0;
 
 void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
@@ -309,10 +310,10 @@ bool is_valid(uint64_t action, v_array<uint32_t> valid_actions)
 void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<action>& gold_actions)
 { gold_actions.erase();
   task_data *data = sch.get_task_data<task_data>();
-  v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &gold_heads=data->gold_heads, &valid_actions=data->valid_actions;
+  v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &gold_heads=data->gold_heads, &gold_concepts=data->gold_concepts, &valid_actions=data->valid_actions;
   size_t size = stack.size();
   size_t last = (size==0) ? 0 : stack.last();
-  if (is_valid(DELETE,valid_actions) && gold_heads[idx] == NO_HEAD)
+  if (is_valid(DELETE,valid_actions) && gold_concepts[idx] == NULL_CONCEPT)
   { gold_actions.push_back(DELETE);
     return;
   }
@@ -330,6 +331,16 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   for(size_t i = 1; i<=NUM_ACTIONS ; i++)
     action_loss[i] = (is_valid(i,valid_actions))?0:100;
 
+  for(size_t i = 0; i <size; i++)
+  {  if(gold_heads[stack[i]] == idx || (gold_heads[idx] == stack[i] && gold_concepts[idx] != NULL_CONCEPT))
+       action_loss[DELETE] += 1;
+  }
+
+  for(size_t i = idx+1; i<=n; i++)
+  {  if(gold_heads[i] == idx || (gold_heads[idx] == i && gold_concepts[idx] != NULL_CONCEPT))
+       action_loss[DELETE] += 1;
+  }
+
   if (size >= 3)
   { for(size_t i = 0; i<size-2; i++)
       if(idx <=n && (gold_heads[stack[i]] == idx || gold_heads[idx] == stack[i]))
@@ -340,6 +351,8 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   if(size>=2 && gold_heads[stack[size-2]] == idx)
     action_loss[SHIFT] += 1;
 
+  if(gold_concepts[idx] == NULL_CONCEPT) //this node should have been deleted
+    action_loss[SHIFT] += 1;
 
   if(size>0)
   { for(size_t i = idx+1; i<=n; i++)
@@ -351,6 +364,9 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   if(size>=2 && gold_heads[last] == stack[size-2]) //i.e. we can't do REDUCE_RIGHT anymore 
     action_loss[REDUCE_LEFT] += 1;
   if(size>=3 && gold_heads[last] == stack[size-3]) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
+    action_loss[REDUCE_LEFT] += 1;
+
+  if(gold_concepts[idx] == NULL_CONCEPT) //this node should have been deleted
     action_loss[REDUCE_LEFT] += 1;
 
   if(size>0 && gold_heads[last] >=idx) // we assume here that every node has only one head. Hallucinated nodes will take care of co-ref
@@ -378,7 +394,10 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
       action_loss[SWAP_REDUCE_LEFT] +=1;
     if(gold_heads[stack[size-1]] == idx)
       action_loss[SWAP_REDUCE_LEFT] +=1;
+
   }
+  if(gold_concepts[idx] == NULL_CONCEPT) //this node should have been deleted
+    action_loss[SWAP_REDUCE_LEFT] += 1;
 
   if(size>0)
   { for(size_t i=idx; i<=n; i++)
@@ -445,7 +464,7 @@ void run(Search::search& sch, vector<example*>& ec)
   cdbg << "n " << n << endl;
   stack.erase();
   //cdbg << "stack_size" << stack.size() << endl;
-  stack.push_back(data->root_label); //if ROOT is pushed into stack then what prevents an AMR from having two roots?
+  stack.push_back(ROOT); //if ROOT is pushed into stack then what prevents an AMR from having two roots?
   for(size_t i=0; i<6; i++)
     for(size_t j=0; j<n+1; j++)
       data->children[i][j] = 0;
@@ -476,19 +495,20 @@ void run(Search::search& sch, vector<example*>& ec)
            .set_condition_range(count-1, sch.get_history_length(), 'p')
            .set_learner_id(0)
            .predict();
-
+    cdbg << "PREDICTED ACTION " << a_id << endl;
     count++;
     if ((!extracted_features) && sch.predictNeedsExample())
       extract_features(sch, idx, ec);
 
     if (a_id == SHIFT)
     { uint32_t gold_concept = gold_concepts[idx]; 
-      t_id = Search::predictor(sch, (ptag) count)
-             .set_input(*(data->ex))
-             .set_oracle(gold_concept)
-             .set_condition_range(count-1, sch.get_history_length(), 'p')
-             .set_learner_id(a_id)
-             .predict();
+      t_id = P.set_tag((ptag) count)
+              .set_input(*(data->ex))
+              .set_oracle(gold_concept)
+              .erase_alloweds()
+              .set_condition_range(count-1, sch.get_history_length(), 'p')
+              .set_learner_id(a_id)
+              .predict();
     }
     else if (a_id == REDUCE_LEFT || a_id == REDUCE_RIGHT || a_id == SWAP_REDUCE_RIGHT)
     { uint32_t gold_label = gold_tags[stack.last()];

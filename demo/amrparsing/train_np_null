@@ -1,0 +1,10 @@
+1	At		PP	0	NOEDGE		null
+2	a		DT	0	NOEDGE		null
+3	glance		NN	6	MANNER		glance-01
+4	I		PP	5	ARG0		i
+5	can		MD	0	ROOT		possible
+6	distinguish	VB	5	DOMAIN		distinguish-01
+7	China		NN	6	ARG1		china
+8	from		PP	0	NOEDGE		null
+9	Arizona		NN	6	ARG2		arizona
+

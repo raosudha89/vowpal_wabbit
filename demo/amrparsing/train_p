@@ -1,0 +1,18 @@
+1	John	NN	2	ARG0	John
+2	loved	VB	0	ROOT	love-01
+3	Mary	NN	2	ARG1	Mary
+4	very	PP	2	MOD	very
+5	much	PP	4	MOD	much
+
+1	John	NN	2	ARG0	John
+2	loved	VB	0	ROOT	love-01
+3	Mary	NN	2	ARG1	Mary
+4	very	PP	2	MOD	very
+5	much	PP	4	MOD	much
+
+1	John	NN	2	ARG0	John
+2	loved	VB	0	ROOT	love-01
+3	Mary	NN	2	ARG1	Mary
+4	very	PP	2	MOD	very
+5	much	PP	4	MOD	much
+
