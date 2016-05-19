@@ -35,14 +35,17 @@ const action REDUCE_RIGHT         = 2;
 const action REDUCE_LEFT          = 3;
 const action SWAP_REDUCE_RIGHT	  = 4;
 const action SWAP_REDUCE_LEFT 	  = 5;
-const int NULL_CONCEPT = 0;
-const int NO_HEAD = 0;
-const int NO_EDGE = 0;
+const action DELETE 		  = 6;
+const int NUM_ACTIONS = 6;
+const int NUM_LEARNERS = 6;
+const int NULL_CONCEPT = 0; //this is not predicted and hence can be 0
+const int NO_HEAD = 0; //this is not predicted and hence can be 0
+const int NO_EDGE = 0; //this is not predicted and hence can be 0
 
 void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
-  data->action_loss.resize(6);
+  data->action_loss.resize(NUM_ACTIONS);
   data->ex = NULL;
   sch.set_task_data<task_data>(data);
 
@@ -62,7 +65,7 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
     data->ex->indices.push_back((unsigned char)i+'A');
   data->ex->indices.push_back(constant_namespace);
 
-  sch.set_num_learners(6);
+  sch.set_num_learners(NUM_LEARNERS);
 
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
@@ -131,21 +134,17 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &heads=data->heads, &stack=data->stack, &gold_heads=data->gold_heads, &gold_tags=data->gold_tags, &tags = data->tags, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<uint32_t> *children = data->children;
-  if (a_id == SHIFT)
-  { if(t_id == NULL_CONCEPT) 
-    { concepts[idx] = t_id;
-      heads[idx] = NO_HEAD;
-      tags[idx] = NO_EDGE;
-      sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
-      sch.loss(gold_heads[idx] != heads[idx] ? 1.f : 0.f);
-      sch.loss(gold_tags[idx] != tags[idx] ? 1.f : 0.f);
-    }
-    else 
-    { stack.push_back(idx);
-      concepts[idx] = t_id;
-      sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
-    }
-    
+  if (a_id == DELETE)
+  { concepts[idx] = NULL_CONCEPT;
+    heads[idx] = NO_HEAD;
+    tags[idx] = NO_EDGE;
+    sch.loss(gold_concepts[idx] != concepts[idx] ? 3.f : 0.f);
+    return idx+1; 
+  }
+  else if (a_id == SHIFT)
+  { stack.push_back(idx);
+    concepts[idx] = t_id;
+    sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
     return idx+1;
   }
   else if (a_id == REDUCE_RIGHT)
@@ -286,6 +285,8 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
 
 void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t n, uint64_t stack_depth, uint64_t state)
 { valid_action.erase();
+  if(idx<=n) // DELETE
+    valid_action.push_back( DELETE );
   if(idx<=n) // SHIFT
     valid_action.push_back( SHIFT );
   if(stack_depth >=2) // RIGHT
@@ -311,6 +312,11 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &gold_heads=data->gold_heads, &valid_actions=data->valid_actions;
   size_t size = stack.size();
   size_t last = (size==0) ? 0 : stack.last();
+  if (is_valid(DELETE,valid_actions) && gold_heads[idx] == NO_HEAD)
+  { gold_actions.push_back(DELETE);
+    return;
+  }
+  
   if (is_valid(SHIFT,valid_actions) &&( stack.empty() || gold_heads[idx] == last)) // becoz if we take any ohter action, we will lose this edge
   { gold_actions.push_back(SHIFT);
     return;
@@ -321,7 +327,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     return;
   }
 
-  for(size_t i = 1; i<=5 ; i++)
+  for(size_t i = 1; i<=NUM_ACTIONS ; i++)
     action_loss[i] = (is_valid(i,valid_actions))?0:100;
 
   if (size >= 3)
@@ -436,18 +442,19 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<uint32_t> &stack=data->stack, &gold_heads=data->gold_heads, &valid_actions=data->valid_actions, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<action> &gold_actions = data->gold_actions;
   uint64_t n = (uint64_t) ec.size();
-
-  //stack.push_back((data->root_label==0)?0:1);
-  stack.push_back(0);
+  cdbg << "n " << n << endl;
+  stack.erase();
+  //cdbg << "stack_size" << stack.size() << endl;
+  stack.push_back(data->root_label); //if ROOT is pushed into stack then what prevents an AMR from having two roots?
   for(size_t i=0; i<6; i++)
     for(size_t j=0; j<n+1; j++)
       data->children[i][j] = 0;
 
   int count=1;
-  //size_t idx = ((data->root_label==0)?1:2);
   size_t idx = 1;
   Search::predictor P(sch, (ptag) 0);
 
+  //cdbg << "stack_size" << stack.size() << endl;
   while(stack.size()>1 || idx <= n)
   { bool extracted_features = false;
     if(sch.predictNeedsExample())
@@ -455,6 +462,10 @@ void run(Search::search& sch, vector<example*>& ec)
       extracted_features = true;
     }
     get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last());
+    
+    cdbg << "VALID ACTIONS " << valid_actions << endl;
+    cdbg << "idx " << idx << endl;
+    cdbg << "stack_size " << stack.size() << endl;
     size_t a_id = 0, t_id = 0;
 
     get_gold_actions(sch, idx, n, gold_actions);
@@ -466,7 +477,6 @@ void run(Search::search& sch, vector<example*>& ec)
            .set_learner_id(0)
            .predict();
 
-    // Predict the next action {SHIFT, REDUCE_LEFT, REDUCE_RIGHT}
     count++;
     if ((!extracted_features) && sch.predictNeedsExample())
       extract_features(sch, idx, ec);
@@ -504,6 +514,7 @@ void run(Search::search& sch, vector<example*>& ec)
     count++;
     idx = transition_hybrid(sch, a_id, idx, t_id);
   }
+  //only root should be left in the stack at this point
   heads[stack.last()] = 0;
   tags[stack.last()] = (uint64_t)data->root_label;
   sch.loss((gold_heads[stack.last()] != heads[stack.last()]));
