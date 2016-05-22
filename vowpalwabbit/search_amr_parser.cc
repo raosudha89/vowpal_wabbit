@@ -36,6 +36,7 @@ const action REDUCE_LEFT          = 3;
 const action SWAP_REDUCE_RIGHT	  = 4;
 const action SWAP_REDUCE_LEFT 	  = 5;
 const action SHIFT 		  = 6;
+
 const int NUM_ACTIONS = 6;
 const int NUM_LEARNERS = 6;
 const int NULL_CONCEPT = 1;
@@ -46,7 +47,7 @@ const int ROOT = 0;
 void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
-  data->action_loss.resize(NUM_ACTIONS);
+  data->action_loss.resize(NUM_ACTIONS+1);
   data->ex = NULL;
   sch.set_task_data<task_data>(data);
   //sch.set_force_oracle(1);
