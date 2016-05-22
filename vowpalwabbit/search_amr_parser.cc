@@ -30,15 +30,15 @@ namespace AMRParserTask
 {
 using namespace Search;
 
-const action SHIFT                = 1;
+const action MAKE_CONCEPT         = 1;
 const action REDUCE_RIGHT         = 2;
 const action REDUCE_LEFT          = 3;
 const action SWAP_REDUCE_RIGHT	  = 4;
 const action SWAP_REDUCE_LEFT 	  = 5;
-const action DELETE 		  = 6;
+const action SHIFT 		  = 6;
 const int NUM_ACTIONS = 6;
 const int NUM_LEARNERS = 6;
-const int NULL_CONCEPT = 0; //this is not predicted and hence can be 0
+const int NULL_CONCEPT = 1;
 const int NO_HEAD = 0; //this is not predicted and hence can be 0
 const int NO_EDGE = 0; //this is not predicted and hence can be 0
 const int ROOT = 0;
@@ -49,6 +49,7 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
   data->action_loss.resize(NUM_ACTIONS);
   data->ex = NULL;
   sch.set_task_data<task_data>(data);
+  //sch.set_force_oracle(1);
 
   new_options(all, "AMR Parser Options")
   ("root_label", po::value<size_t>(&(data->root_label))->default_value(1), "Ensure that there is only one root in each sentence")
@@ -135,17 +136,25 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &heads=data->heads, &stack=data->stack, &gold_heads=data->gold_heads, &gold_tags=data->gold_tags, &tags = data->tags, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<uint32_t> *children = data->children;
-  if (a_id == DELETE)
-  { concepts[idx] = NULL_CONCEPT;
-    heads[idx] = NO_HEAD;
-    tags[idx] = NO_EDGE;
-    sch.loss(gold_concepts[idx] != concepts[idx] ? 3.f : 0.f);
-    return idx+1; 
+  if (a_id == MAKE_CONCEPT)
+  { concepts[idx] = t_id;
+    if (t_id == NULL_CONCEPT)
+    {  heads[idx] = NO_HEAD;
+       tags[idx] = NO_EDGE;
+       sch.loss(gold_concepts[idx] != concepts[idx] ? 3.f : 0.f);
+       //cdbg << "NULL_CONCEPT" << endl;
+       //cdbg << "idx " << idx << endl;
+       //cdbg << "heads " << heads[idx] << endl;
+       return idx+1;
+    }
+    else
+    {  sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
+       return idx;
+    } 
   }
   else if (a_id == SHIFT)
   { stack.push_back(idx);
-    concepts[idx] = t_id;
-    sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
+    //cdbg << "SHIFT PUSHED " << idx << endl;
     return idx+1;
   }
   else if (a_id == REDUCE_RIGHT)
@@ -163,6 +172,7 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
   }
   else if (a_id == REDUCE_LEFT)
   { size_t last    = stack.last();
+    //cdbg << "last " << last << endl;
     heads[last]      = idx;
     children[3][idx] = children[2][idx];
     children[2][idx] = last;
@@ -171,7 +181,9 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
     sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
     assert(! stack.empty());
     stack.pop();
-    return idx;
+    stack.push_back(idx);
+    //cdbg << "RL PUSHED " << idx << endl;
+    return idx+1;
   }
   else if (a_id == SWAP_REDUCE_RIGHT)
   {
@@ -204,7 +216,9 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
     tags[second_last] = t_id;
     sch.loss(gold_heads[second_last] != heads[second_last] ? 2 : (gold_tags[second_last] != t_id) ? 1.f : 0.f);
     stack.push_back(last);
-    return idx;
+    stack.push_back(idx);
+    //cdbg << "SRL PUSHED " << idx << endl;
+    return idx+1;
    }
   THROW("transition_hybrid failed");
 }
@@ -284,20 +298,23 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
   data->ex->total_sum_feat_sq = (float) count + new_weight;
 }
 
-void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t n, uint64_t stack_depth, uint64_t state)
+void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t n, uint64_t stack_depth, uint64_t state, v_array<uint32_t> &concepts)
 { valid_action.erase();
-  if(idx<=n) // DELETE
-    valid_action.push_back( DELETE );
-  if(idx<=n) // SHIFT
+  if(idx<=n && concepts[idx] == 0)
+    valid_action.push_back( MAKE_CONCEPT );
+  if(idx<=n && concepts[idx] != 0)
     valid_action.push_back( SHIFT );
-  if(stack_depth >=2) // RIGHT
+  if(stack_depth >=2)
     valid_action.push_back( REDUCE_RIGHT );
-  if(stack_depth >=1 && state!=0 && idx<=n) // LEFT
+  if(stack_depth >=1 && state!=0 && idx<=n && concepts[idx] != 0)
     valid_action.push_back( REDUCE_LEFT );
   if(stack_depth >=3)
     valid_action.push_back( SWAP_REDUCE_RIGHT );
-  if(stack_depth >=2 && state!=0 && idx<=n)
+  if(stack_depth >=2 && state!=0 && idx<=n && concepts[idx] != 0)
     valid_action.push_back( SWAP_REDUCE_LEFT);
+  //cdbg << "GET_VALID_ACTIONS" << endl;
+  //cdbg << "concepts[idx] " << concepts[idx] << endl;
+  //cdbg << "valid_actions " << valid_action << endl;
 }
 
 bool is_valid(uint64_t action, v_array<uint32_t> valid_actions)
@@ -310,35 +327,31 @@ bool is_valid(uint64_t action, v_array<uint32_t> valid_actions)
 void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<action>& gold_actions)
 { gold_actions.erase();
   task_data *data = sch.get_task_data<task_data>();
-  v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &gold_heads=data->gold_heads, &gold_concepts=data->gold_concepts, &valid_actions=data->valid_actions;
+  v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &gold_heads=data->gold_heads, &valid_actions=data->valid_actions;
   size_t size = stack.size();
   size_t last = (size==0) ? 0 : stack.last();
-  if (is_valid(DELETE,valid_actions) && gold_concepts[idx] == NULL_CONCEPT)
-  { gold_actions.push_back(DELETE);
-    return;
-  }
   
-  if (is_valid(SHIFT,valid_actions) &&( stack.empty() || gold_heads[idx] == last)) // becoz if we take any ohter action, we will lose this edge
-  { gold_actions.push_back(SHIFT);
+  if (size >=2 && is_valid(SWAP_REDUCE_LEFT, valid_actions) && gold_heads[stack[size-2]] == idx)
+  { gold_actions.push_back(SWAP_REDUCE_LEFT);
+    //cdbg << "RET SRL" << endl;
     return;
   }
 
   if (is_valid(REDUCE_LEFT,valid_actions) && gold_heads[last] == idx)
   { gold_actions.push_back(REDUCE_LEFT);
+    //cdbg << "RET RL" << endl;
     return;
   }
-
-  for(size_t i = 1; i<=NUM_ACTIONS ; i++)
-    action_loss[i] = (is_valid(i,valid_actions))?0:100;
-
-  for(size_t i = 0; i <size; i++)
-  {  if(gold_heads[stack[i]] == idx || (gold_heads[idx] == stack[i] && gold_concepts[idx] != NULL_CONCEPT))
-       action_loss[DELETE] += 1;
+  
+  if (is_valid(SHIFT,valid_actions) &&( stack.empty() || gold_heads[idx] == last)) // becoz if we take any ohter action, we will lose this edge
+  { gold_actions.push_back(SHIFT);
+    //cdbg << "RET S" << endl;
+    return;
   }
-
-  for(size_t i = idx+1; i<=n; i++)
-  {  if(gold_heads[i] == idx || (gold_heads[idx] == i && gold_concepts[idx] != NULL_CONCEPT))
-       action_loss[DELETE] += 1;
+  
+  for(size_t i = 1; i<=NUM_ACTIONS ; i++)
+  {  action_loss[i] = (is_valid(i,valid_actions))?0:100;
+     //cdbg << "action_loss " << action_loss[i] << endl;
   }
 
   if (size >= 3)
@@ -351,9 +364,6 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   if(size>=2 && gold_heads[stack[size-2]] == idx)
     action_loss[SHIFT] += 1;
 
-  if(gold_concepts[idx] == NULL_CONCEPT) //this node should have been deleted
-    action_loss[SHIFT] += 1;
-
   if(size>0)
   { for(size_t i = idx+1; i<=n; i++)
       if(gold_heads[i] == last|| gold_heads[last] == i)
@@ -364,9 +374,6 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   if(size>=2 && gold_heads[last] == stack[size-2]) //i.e. we can't do REDUCE_RIGHT anymore 
     action_loss[REDUCE_LEFT] += 1;
   if(size>=3 && gold_heads[last] == stack[size-3]) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
-    action_loss[REDUCE_LEFT] += 1;
-
-  if(gold_concepts[idx] == NULL_CONCEPT) //this node should have been deleted
     action_loss[REDUCE_LEFT] += 1;
 
   if(size>0 && gold_heads[last] >=idx) // we assume here that every node has only one head. Hallucinated nodes will take care of co-ref
@@ -396,8 +403,6 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
       action_loss[SWAP_REDUCE_LEFT] +=1;
 
   }
-  if(gold_concepts[idx] == NULL_CONCEPT) //this node should have been deleted
-    action_loss[SWAP_REDUCE_LEFT] += 1;
 
   if(size>0)
   { for(size_t i=idx; i<=n; i++)
@@ -408,9 +413,9 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   }
 
   // return the best actions
-  size_t best_action = 1;
+  size_t best_action = 2;
   size_t count = 0;
-  for(size_t i=1; i<=3; i++)
+  for(size_t i=2; i<=NUM_ACTIONS; i++)
     if(action_loss[i] < action_loss[best_action])
     { best_action= i;
       count = 1;
@@ -421,6 +426,11 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     { count++;
       gold_actions.push_back(i);
     }
+  // return 1 only if no other action is better than 1
+  if (action_loss[1] < action_loss[best_action])
+  { gold_actions.erase();
+    gold_actions.push_back((uint32_t)1);
+  }
 }
 
 void setup(Search::search& sch, vector<example*>& ec)
@@ -451,6 +461,7 @@ void setup(Search::search& sch, vector<example*>& ec)
     heads[i+1] = 0;
     tags[i+1] = -1;
     concepts[i+1] = 0;
+
   }
   for(size_t i=0; i<6; i++)
     data->children[i].resize(n+(size_t)1);
@@ -461,8 +472,10 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<uint32_t> &stack=data->stack, &gold_heads=data->gold_heads, &valid_actions=data->valid_actions, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<action> &gold_actions = data->gold_actions;
   uint64_t n = (uint64_t) ec.size();
-  cdbg << "n " << n << endl;
+  //cdbg << "n " << n << endl;
   stack.erase();
+  for (size_t i=0; i<=n; i++)
+    concepts[i] = 0;
   //cdbg << "stack_size" << stack.size() << endl;
   stack.push_back(ROOT); //if ROOT is pushed into stack then what prevents an AMR from having two roots?
   for(size_t i=0; i<6; i++)
@@ -480,7 +493,7 @@ void run(Search::search& sch, vector<example*>& ec)
     { extract_features(sch, idx, ec);
       extracted_features = true;
     }
-    get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last());
+    get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last(), concepts);
     
     cdbg << "VALID ACTIONS " << valid_actions << endl;
     cdbg << "idx " << idx << endl;
@@ -488,6 +501,7 @@ void run(Search::search& sch, vector<example*>& ec)
     size_t a_id = 0, t_id = 0;
 
     get_gold_actions(sch, idx, n, gold_actions);
+    cdbg << "GOLD ACTIONS " << gold_actions << endl;
     a_id= P.set_tag((ptag) count)
            .set_input(*(data->ex))
            .set_oracle(gold_actions)
@@ -500,7 +514,7 @@ void run(Search::search& sch, vector<example*>& ec)
     if ((!extracted_features) && sch.predictNeedsExample())
       extract_features(sch, idx, ec);
 
-    if (a_id == SHIFT)
+    if (a_id == MAKE_CONCEPT)
     { uint32_t gold_concept = gold_concepts[idx]; 
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
@@ -509,6 +523,7 @@ void run(Search::search& sch, vector<example*>& ec)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      cdbg << "t_id " << t_id << endl;
     }
     else if (a_id == REDUCE_LEFT || a_id == REDUCE_RIGHT || a_id == SWAP_REDUCE_RIGHT)
     { uint32_t gold_label = gold_tags[stack.last()];
@@ -519,6 +534,7 @@ void run(Search::search& sch, vector<example*>& ec)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      cdbg << "t_id " << t_id << endl;
     }
     else if (a_id == SWAP_REDUCE_LEFT)
     { uint32_t gold_label = gold_tags[stack[stack.size()-2]];
@@ -529,13 +545,14 @@ void run(Search::search& sch, vector<example*>& ec)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      cdbg << "t_id " << t_id << endl;
     }
 
     count++;
     idx = transition_hybrid(sch, a_id, idx, t_id);
   }
   //only root should be left in the stack at this point
-  heads[stack.last()] = 0;
+  heads[stack.last()] = 100;
   tags[stack.last()] = (uint64_t)data->root_label;
   sch.loss((gold_heads[stack.last()] != heads[stack.last()]));
   if (sch.output().good())

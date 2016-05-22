@@ -1,0 +1,14 @@
+1	This		PP	13	ARG1		this
+2	is		VB	0	NOEDGE		null
+3	the		DT	0	NOEDGE		null
+4	sovereign	NN	8	ARG0		sovereign
+5	of		IN	0	NOEDGE		null
+6	each		NN	7	MOD		each
+7	country		NN	4	ARG0		country
+8	and		DT	0	ROOT		and
+9	it		PP	0	NOEDGE		null
+10	should		MD	8	MOD		should
+11	receive		VB	10	MOD		receive-01
+12	full		ADJ	13	MOD		full
+13	respect		NN	11	ARG1		respect	
+
