@@ -17,8 +17,8 @@ namespace AMRParserTask         {  Search::search_task task = { "amr_parser", ru
 
 struct task_data
 { example *ex;
-  size_t root_label;
-  uint32_t num_label;
+  size_t amr_root_label;
+  uint32_t amr_num_label;
   v_array<uint32_t> valid_actions, action_loss, gold_heads, gold_tags, stack, heads, tags, temp, valid_action_temp, gold_concepts, concepts;
   v_array<action> gold_actions, gold_action_temp;
   v_array<pair<action, float>> gold_action_losses;
@@ -53,14 +53,14 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
   //sch.set_force_oracle(1);
 
   new_options(all, "AMR Parser Options")
-  ("root_label", po::value<size_t>(&(data->root_label))->default_value(1), "Ensure that there is only one root in each sentence")
-  ("num_label", po::value<uint32_t>(&(data->num_label))->default_value(5), "Number of arc labels");
+  ("amr_root_label", po::value<size_t>(&(data->amr_root_label))->default_value(1), "Ensure that there is only one root in each sentence")
+  ("amr_num_label", po::value<uint32_t>(&(data->amr_num_label))->default_value(5), "Number of arc labels");
   add_options(all);
 
-  check_option<size_t>(data->root_label, all, vm, "root_label", false, size_equal,
-                       "warning: you specified a different value for --root_label than the one loaded from regressor. proceeding with loaded value: ", "");
-  check_option<uint32_t>(data->num_label, all, vm, "num_label", false, uint32_equal,
-                         "warning: you specified a different value for --num_label than the one loaded from regressor. proceeding with loaded value: ", "");
+  check_option<size_t>(data->amr_root_label, all, vm, "amr_root_label", false, size_equal,
+                       "warning: you specified a different value for --amr_root_label than the one loaded from regressor. proceeding with loaded value: ", "");
+  check_option<uint32_t>(data->amr_num_label, all, vm, "amr_num_label", false, uint32_equal,
+                         "warning: you specified a different value for --amr_num_label than the one loaded from regressor. proceeding with loaded value: ", "");
 
   data->ex = VW::alloc_examples(sizeof(polylabel), 1);
   data->ex->indices.push_back(val_namespace);
@@ -451,10 +451,10 @@ void setup(Search::search& sch, vector<example*>& ec)
   { v_array<COST_SENSITIVE::wclass>& costs = ec[i]->l.cs.costs;
     size_t head,tag,concept;
     head = (costs.size() == 0) ? 0 : costs[0].class_index;
-    tag  = (costs.size() <= 1) ? (uint64_t)data->root_label : costs[1].class_index;
+    tag  = (costs.size() <= 1) ? (uint64_t)data->amr_root_label : costs[1].class_index;
     concept  = (costs.size() <= 2) ? 0 : costs[2].class_index;
-    if (tag > data->num_label)
-      THROW("invalid label " << tag << " which is > num actions=" << data->num_label);
+    if (tag > data->amr_num_label)
+      THROW("invalid label " << tag << " which is > num actions=" << data->amr_num_label);
 
     gold_heads.push_back(head);
     gold_tags.push_back(tag);
@@ -554,7 +554,7 @@ void run(Search::search& sch, vector<example*>& ec)
   }
   //only root should be left in the stack at this point
   heads[stack.last()] = 0;
-  tags[stack.last()] = (uint64_t)data->root_label;
+  tags[stack.last()] = (uint64_t)data->amr_root_label;
   sch.loss((gold_heads[stack.last()] != heads[stack.last()]));
   if (sch.output().good())
     for(size_t i=1; i<=n; i++)
