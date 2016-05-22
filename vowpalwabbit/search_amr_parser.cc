@@ -553,7 +553,7 @@ void run(Search::search& sch, vector<example*>& ec)
     idx = transition_hybrid(sch, a_id, idx, t_id);
   }
   //only root should be left in the stack at this point
-  heads[stack.last()] = 100;
+  heads[stack.last()] = 0;
   tags[stack.last()] = (uint64_t)data->root_label;
   sch.loss((gold_heads[stack.last()] != heads[stack.last()]));
   if (sch.output().good())
