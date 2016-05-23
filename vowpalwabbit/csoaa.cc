@@ -58,9 +58,22 @@ inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
 
 bool maybe_do_multipredict(csoaa& c, base_learner& base, example& ec, COST_SENSITIVE::label& ld)
 { if (! DO_MULTIPREDICT) return false;
-  if ((ld.costs.size() > 0) && (ld.costs.size() * 2 < c.num_classes)) return false;  // not worth doing multipredict
+  //if ((ld.costs.size() > 0) && (ld.costs.size() * 2 < c.num_classes)) return false;  // not worth doing multipredict
+  uint32_t max_index = c.num_classes;
+  if ((ld.costs.size() > 0) && (ld.costs.size() * 2 < c.num_classes)) // only do multipredict if they're consecutive-ish starting at 1-ish
+  { uint32_t min_index = c.num_classes;
+    max_index = 1;
+    for (wclass& wc : ld.costs)
+    { if (wc.class_index < min_index) min_index = wc.class_index;
+      if (wc.class_index > max_index) max_index = wc.class_index;
+      if ((min_index == 1) && (max_index == c.num_classes)) break;
+    }
+    if (max_index < min_index+5) return false; // not worth it
+    if (max_index-min_index < min_index) return false; // not worth it
+  }
+    
   ec.l.simple = { FLT_MAX, 0., 0. };
-  base.multipredict(ec, 0, c.num_classes, c.pred, false);
+  base.multipredict(ec, 0, max_index, c.pred, false);
   return true;
 }
 
