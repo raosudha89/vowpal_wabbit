@@ -46,8 +46,6 @@ inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
   else
     base.predict(ec, i-1);
 
-  cerr << "csoaa::inner_loop i=" << i << " pp=" << ec.partial_prediction << endl;
-  
   partial_prediction = ec.partial_prediction;
   if (ec.partial_prediction < score || (ec.partial_prediction == score && i < prediction))
   { score = ec.partial_prediction;
@@ -56,7 +54,7 @@ inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
   if (ec.passthrough) add_passthrough_feature(ec, i, ec.partial_prediction);
 }
 
-#define DO_MULTIPREDICT false
+#define DO_MULTIPREDICT true
 
 bool maybe_do_multipredict(csoaa& c, base_learner& base, example& ec, COST_SENSITIVE::label& ld)
 { if (! DO_MULTIPREDICT) return false;
