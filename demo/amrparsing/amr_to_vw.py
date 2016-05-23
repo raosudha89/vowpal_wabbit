@@ -217,7 +217,7 @@ def main(argv):
 					else:
 						extra += 1
 				else:
-					print count,"\t",sent_tok[i],"\t",0,"\t","NOEDGE","\t","NULL"
+					print count,"\t",sent_tok[i],"\t",POS,"\t",0,"\t","NOEDGE","\t","NULL"
 					i += 1
 				count += 1
 			print
