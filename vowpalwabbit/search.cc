@@ -638,6 +638,7 @@ void reset_search_structure(search_private& priv)
 
 void search_declare_loss(search_private& priv, float loss)
 { priv.loss_declared_cnt++;
+  cdbg << "search_declare_loss, loss_declared_cnt=" << priv.loss_declared_cnt << ", add loss " << loss << endl;
   switch (priv.state)
   { case INIT_TEST:  priv.test_loss  += loss; break;
     case INIT_TRAIN: priv.train_loss += loss; break;
