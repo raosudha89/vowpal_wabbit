@@ -38,10 +38,9 @@ const action REDUCE_LEFT          = 3;
 const action SWAP_REDUCE_RIGHT	  = 4;
 const action SWAP_REDUCE_LEFT 	  = 5;
 const action SHIFT 		  = 6;
-//const action HALLUCINATE          = 7;
+const action HALLUCINATE          = 7;
 
-//const int NUM_ACTIONS = 7;
-const int NUM_ACTIONS = 6;
+const int NUM_ACTIONS = 7;
 const int NUM_LEARNERS = 7;
 const int NULL_CONCEPT = 1;
 const int NO_HEAD = 0; //this is not predicted and hence can be 0
@@ -306,11 +305,11 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
     //cdbg << "SRL PUSHED " << idx << endl;
     return idx+1;
    }
-   //else if (a_id == HALLUCINATE)
-   //{
-   //  stack.push_back(t_id);
-   //  return idx; 
-   //}
+   else if (a_id == HALLUCINATE)
+   {
+     stack.push_back(t_id);
+     return idx; 
+   }
   THROW("transition_hybrid failed");
 }
 
@@ -404,8 +403,8 @@ void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t 
     valid_action.push_back( SWAP_REDUCE_RIGHT );
   if(stack_depth >=2 && state!=0 && idx<=n && concepts[idx] != 0)
     valid_action.push_back( SWAP_REDUCE_LEFT);
-  //if(stack_depth >=1 && state!=0)
-  //  valid_action.push_back( HALLUCINATE);
+  if(stack_depth >=1 && state!=0)
+    valid_action.push_back( HALLUCINATE);
   //cdbg << "GET_VALID_ACTIONS" << endl;
   //cdbg << "concepts[idx] " << concepts[idx] << endl;
   //cdbg << "valid_actions " << valid_action << endl;
@@ -422,7 +421,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
 { gold_actions.erase();
   task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &valid_actions=data->valid_actions;
-  v_array<vector<uint32_t>> &gold_heads=data->gold_heads;
+  v_array<vector<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads;
   size_t size = stack.size();
   size_t last = (size==0) ? 0 : stack.last();
   
@@ -444,17 +443,18 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     return;
   }
  
-  //for (uint32_t i=1; i<idx; i++)
-  //{ if (contains(gold_heads[i], last) && !(v_array_contains(stack, i)))
-  //  { gold_actions.push_back(HALLUCINATE);
-  //    return;
-  //  }
-  //}
+  for (uint32_t i=1; i<idx; i++)
+  { if (contains(gold_heads[i], last) && !(contains(heads[i], last)) && !(v_array_contains(stack, i)))
+    { gold_actions.push_back(HALLUCINATE);
+      return;
+    }
+  }
  
   for(size_t i = 1; i<=NUM_ACTIONS ; i++)
   {  action_loss[i] = (is_valid(i,valid_actions))?0:100;
      //cdbg << "action_loss " << action_loss[i] << endl;
   }
+  action_loss[HALLUCINATE] = 100; // We don't want to hallucinate any other time
 
   if (size >= 3)
   { for(size_t i = 0; i<size-2; i++)
@@ -613,6 +613,10 @@ void run(Search::search& sch, vector<example*>& ec)
   size_t idx = 1;
   Search::predictor P(sch, (ptag) 0);
 
+  v_array<action> valid_tags = v_array<action>();
+  for (action a=1; a<data->amr_num_label; a++)
+    valid_tags.push_back(a);
+
   //cdbg << "stack_size" << stack.size() << endl;
   while(stack.size()>1 || idx <= n)
   { bool extracted_features = false;
@@ -681,7 +685,8 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
-              .set_max_allowed(data->amr_num_label)
+              .set_allowed(valid_tags)
+              //.set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
@@ -724,39 +729,40 @@ void run(Search::search& sch, vector<example*>& ec)
       cdbg << "gold_label " << gold_label << endl;
       cdbg << "t_id " << t_id << endl;
     }
-    //else if (a_id == HALLUCINATE)
-    //{ v_array<uint32_t> valid_nodes, is_gold;
-    //  for (size_t i=1; i<idx; i++)
-    //  { if (tags[i].size() >  0) //node is already assigned a parent
-    //    { valid_nodes.push_back(i);
-    //      if (contains(heads[i], stack.last()))
-    //        is_gold.push_back(1);
-    //      else
-    //        is_gold.push_back(0); 
-    //    }
-    //  } 
-    //  t_id = P.set_tag((ptag) count)
-    //          .set_input(*(data->ex))
-    //          .set_oracle(is_gold)
-    //          .set_allowed(valid_nodes)
-    //          .set_condition_range(count-1, sch.get_history_length(), 'p')
-    //          .set_learner_id(a_id)
-    //          .predict();
-    //  count++;
-    //  idx = transition_hybrid(sch, a_id, idx, t_id);
-    //  a_id = REDUCE_RIGHT;
-    //  uint32_t gold_label = 0;
-    //  for (size_t j=0; j<gold_heads[t_id].size(); j++)
-    //    if (gold_heads[t_id][j] == stack.last())
-    //      gold_label = gold_tags[t_id][j];
-    //  t_id = P.set_tag((ptag) count)
-    //          .set_input(*(data->ex))
-    //          .set_oracle(gold_label)
-    //          .set_allowed(valid_tags)
-    //          .set_condition_range(count-1, sch.get_history_length(), 'p')
-    //          .set_learner_id(a_id)
-    //          .predict();
-    //}
+    else if (a_id == HALLUCINATE)
+    { v_array<uint32_t> valid_nodes = v_array<uint32_t>();
+      v_array<uint32_t> is_gold = v_array<uint32_t>();
+      for (uint32_t i=1; i<idx; i++)
+      { if (tags[i].size() >  0) //node is already assigned a parent
+        { valid_nodes.push_back(i);
+          if (contains(heads[i], stack.last()))
+            is_gold.push_back(1);
+          else
+            is_gold.push_back(0); 
+        }
+      } 
+      t_id = P.set_tag((ptag) count)
+              .set_input(*(data->ex))
+              .set_oracle(is_gold)
+              .set_allowed(valid_nodes)
+              .set_condition_range(count-1, sch.get_history_length(), 'p')
+              .set_learner_id(a_id)
+              .predict();
+      count++;
+      idx = transition_hybrid(sch, a_id, idx, t_id);
+      a_id = REDUCE_RIGHT;
+      uint32_t gold_label = 0;
+      for (size_t j=0; j<gold_heads[t_id].size(); j++)
+        if (gold_heads[t_id][j] == stack.last())
+          gold_label = gold_tags[t_id][j];
+      t_id = P.set_tag((ptag) count)
+              .set_input(*(data->ex))
+              .set_oracle(gold_label)
+              .set_max_allowed(data->amr_num_label)
+              .set_condition_range(count-1, sch.get_history_length(), 'p')
+              .set_learner_id(a_id)
+              .predict();
+    }
     count++;
     idx = transition_hybrid(sch, a_id, idx, t_id);
   }
