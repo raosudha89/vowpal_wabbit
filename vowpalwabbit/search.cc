@@ -2446,12 +2446,10 @@ base_learner* setup(vw&all)
   for (size_t i=0; i<all.args.size()-1; i++)
     if (all.args[i] == "--search_task" && all.args[i+1] == "hook")
       has_hook_task = true;
-  cerr << "has_hook_task = " << has_hook_task << endl;
   if (has_hook_task)
   { for (int i = (int)all.args.size()-2; i >= 0; i--)
       if (all.args[i] == "--search_task" && all.args[i+1] != "hook")
         all.args.erase(all.args.begin() + i, all.args.begin() + i + 2);
-    cerr << "removign!" << endl;
     vm.erase(vm.find("search_task"));
     //modify_variable_map<string>(vm, "search_task", "hook");
   }
