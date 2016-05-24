@@ -20,7 +20,7 @@ struct task_data
   size_t root_label;
   uint32_t num_label;
   v_array<uint32_t> valid_actions, action_loss, gold_heads, gold_tags, stack, heads, tags, temp, valid_action_temp;
-  v_array<action> gold_actions, gold_action_temp, valid_tags;
+  v_array<action> gold_actions, gold_action_temp;
   v_array<pair<action, float>> gold_action_losses;
   v_array<uint32_t> children[6]; // [0]:num_left_arcs, [1]:num_right_arcs; [2]: leftmost_arc, [3]: second_leftmost_arc, [4]:rightmost_arc, [5]: second_rightmost_arc
   example * ec_buf[13];
@@ -76,10 +76,6 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 
   num_actions = (data->num_label > 3) ? data->num_label : 3;
 
-  data->valid_tags = v_init<action>();
-  for (action a=1; a<data->num_label; a++)
-    data->valid_tags.push_back(a);
-  
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
   vector<string> newpairs(pair, pair+19);
@@ -114,7 +110,6 @@ void finish(Search::search& sch)
   data->temp.delete_v();
   data->action_loss.delete_v();
   data->gold_actions.delete_v();
-  data->valid_tags.delete_v();
   data->gold_action_losses.delete_v();
   data->gold_action_temp.delete_v();
   VW::dealloc_example(COST_SENSITIVE::cs_label.delete_label, *data->ex);
@@ -416,7 +411,6 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<uint32_t> &gold_action_temp = data->gold_action_temp;
   v_array<pair<action, float>> &gold_action_losses=data->gold_action_losses;
   v_array<action> &gold_actions = data->gold_actions;
-  v_array<action>& valid_tags = data->valid_tags;
   bool &cost_to_go = data->cost_to_go, &one_learner = data->one_learner;
   uint32_t &num_label = data->num_label;
   uint64_t n = (uint64_t) ec.size();
@@ -535,7 +529,7 @@ void run(Search::search& sch, vector<example*>& ec)
         { t_id = P.set_tag((ptag) count)
                  .set_input(*(data->ex))
                  .set_oracle(gold_label)
-                 .set_allowed(valid_tags)
+                 .set_max_allowed(data->num_label)
                  .set_condition_range(count-1, sch.get_history_length(), 'p')
                  .set_learner_id(a_id-1)
                  .predict();

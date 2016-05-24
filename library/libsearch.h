@@ -3,8 +3,7 @@ COpyright (c) by respective owners including Yahoo!, Microsoft, and
 individual contributors. All rights reserved.  Released under a BSD
 license as described in the file LICENSE.
 */
-#ifndef LIBSEARCH_HOOKTASK_H
-#define LIBSEARCH_HOOKTASK_H
+#pragma once
 
 #include "../vowpalwabbit/parser.h"
 #include "../vowpalwabbit/parse_example.h"
@@ -103,18 +102,45 @@ public:
     my_task = task;
     if (my_task->initialize)
       my_task->initialize(sch, num_actions, *d->var_map);
+    task_data = sch.get_task_data<void>();
+    sch.set_task_data(d);
   }
 
-  ~BuiltInTask() { if (my_task->finish) my_task->finish(sch); }
+  ~BuiltInTask()      
+  { if (my_task->finish)
+    { HookTask::task_data* d = sch.get_task_data<HookTask::task_data>();
+      sch.set_task_data(task_data);
+      my_task->finish(sch);
+      sch.set_task_data(d);
+    }
+  }
 
   void _run(Search::search& sch, vector<example*> & input_example, vector<uint32_t> & output)
-  { my_task->run(sch, input_example);
+  { HookTask::task_data* d = sch.get_task_data<HookTask::task_data>();
+    sch.set_task_data(task_data);
+    my_task->run(sch, input_example);
     sch.get_test_action_sequence(output);
+    sch.set_task_data(d);
+  }
+
+  void _setup(Search::search& sch, vector<example*> & input_example, vector<uint32_t> & output)
+  { if (! my_task->run_setup) return;
+    HookTask::task_data* d = sch.get_task_data<HookTask::task_data>();
+    sch.set_task_data(task_data);
+    my_task->run_setup(sch, input_example);
+    sch.set_task_data(d);
+  }
+  
+  void _takedown(Search::search& sch, vector<example*> & input_example, vector<uint32_t> & output)
+  { if (! my_task->run_takedown) return;
+    HookTask::task_data* d = sch.get_task_data<HookTask::task_data>();
+    sch.set_task_data(task_data);
+    my_task->run_takedown(sch, input_example);
+    sch.set_task_data(d);
   }
 
 protected:
   Search::search_task* my_task;
+  void* task_data;
 };
 
-
-#endif

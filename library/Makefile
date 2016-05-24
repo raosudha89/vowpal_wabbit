@@ -28,7 +28,7 @@ ezexample_train: ezexample_train.cc ../vowpalwabbit/libvw.a ../vowpalwabbit/liba
 library_example: library_example.cc ../vowpalwabbit/libvw.a ../vowpalwabbit/liballreduce.a
 	$(CXX) -g $(FLAGS) -o $@ $< $(VWLIBS) $(STDLIBS)
 
-test_search: test_search.cc ../vowpalwabbit/libvw.a ../vowpalwabbit/liballreduce.a
+test_search: test_search.cc libsearch.h ../vowpalwabbit/libvw.a ../vowpalwabbit/liballreduce.a
 	$(CXX) -g $(FLAGS) -o $@ $< $(VWLIBS) $(STDLIBS)
 
 search_generate: search_generate.cc ../vowpalwabbit/libvw.a

@@ -90,7 +90,7 @@ void test_buildin_task()
   if (ret != 0) cerr << "../vowpalwabbit/vw failed" << endl;
 
   // now, load that model using the BuiltInTask library
-  vw& vw_obj = *VW::initialize("-t -i sequence.model --search_task hook");
+  vw& vw_obj = *VW::initialize("-t -i sequence.model");
   { // create a new scope for the task object
     BuiltInTask task(vw_obj, &SequenceTask::task);
     vector<example*> V;
@@ -113,17 +113,7 @@ void test_buildin_task()
 }
 
 int main(int argc, char *argv[])
-{ train();
-  predict();
+{ //train();
+  //predict();
   test_buildin_task();
 }
-
-
-
-
-
-
-
-
-
-
