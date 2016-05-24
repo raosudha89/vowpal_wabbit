@@ -21,6 +21,7 @@ struct csoaa
 { uint32_t num_classes;
   polyprediction* pred;
   bool classificationesque;
+  float initial;
 };
 
 template<bool is_learn>
@@ -58,9 +59,22 @@ inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
 
 bool maybe_do_multipredict(csoaa& c, base_learner& base, example& ec, COST_SENSITIVE::label& ld)
 { if (! DO_MULTIPREDICT) return false;
+  //if ((ld.costs.size() > 0) && (ld.costs.size() * 2 < c.num_classes)) return false;  // not worth doing multipredict
+  uint32_t max_index = c.num_classes;
+  if ((ld.costs.size() > 0) && (ld.costs.size() * 2 < c.num_classes)) // only do multipredict if they're consecutive-ish starting at 1-ish
+  { uint32_t min_index = c.num_classes;
+    max_index = 1;
+    for (wclass& wc : ld.costs)
+    { if (wc.class_index < min_index) min_index = wc.class_index;
+      if (wc.class_index > max_index) max_index = wc.class_index;
+      if ((min_index == 1) && (max_index == c.num_classes)) break;
+    }
+    if (max_index < min_index+5) return false; // not worth it
+    if (max_index-min_index < min_index) return false; // not worth it
+  }
   if ((ld.costs.size() > 0) && (ld.costs.size() * 2 < c.num_classes)) return false;  // not worth doing multipredict
-  ec.l.simple = { FLT_MAX, 0., 0. };
-  base.multipredict(ec, 0, c.num_classes, c.pred, false);
+  ec.l.simple = { FLT_MAX, 0., c.initial };
+  base.multipredict(ec, 0, max_index, c.pred, false);
   return true;
 }
 
@@ -71,7 +85,7 @@ void predict_or_learn(csoaa& c, base_learner& base, example& ec)
   uint32_t prediction = 1;
   float score = FLT_MAX;
   size_t pt_start = ec.passthrough ? ec.passthrough->size() : 0;
-  ec.l.simple = { 0., 0., 0. };
+  ec.l.simple = { 0., 0., c.initial };
   
   if (ld.costs.size() > 0)
   { bool predicted = maybe_do_multipredict(c, base, ec, ld);
@@ -80,7 +94,7 @@ void predict_or_learn(csoaa& c, base_learner& base, example& ec)
     ec.partial_prediction = score;
   }
   else if (DO_MULTIPREDICT && !is_learn)
-  { ec.l.simple = { FLT_MAX, 0.f, 0.f };
+  { ec.l.simple = { FLT_MAX, 0.f, c.initial };
     base.multipredict(ec, 0, c.num_classes, c.pred, false);
     for (uint32_t i = 1; i <= c.num_classes; i++)
     { if (ec.passthrough)
@@ -131,11 +145,14 @@ void finish(csoaa& c)
 base_learner* csoaa_setup(vw& all)
 { if (missing_option<size_t, true>(all, "csoaa", "One-against-all multiclass with <k> costs"))
     return nullptr;
-  new_options(all, "CSOAA Options")
-      ("classificationesque", "switch CSOAA into classification mode");
-  add_options(all);
 
   csoaa& c = calloc_or_throw<csoaa>();
+  
+  new_options(all, "CSOAA Options")
+      ("classificationesque", "switch CSOAA into classification mode")
+      ("initial_cost", po::value<float>(&c.initial)->default_value(0.), "set the initial prediction value (default 0.; 1. makes csoaa pessimistic)");
+  add_options(all);
+  
   c.num_classes = (uint32_t)all.vm["csoaa"].as<size_t>();
   c.pred = calloc_or_throw<polyprediction>(c.num_classes);
   c.classificationesque = all.vm.count("classificationesque") > 0;

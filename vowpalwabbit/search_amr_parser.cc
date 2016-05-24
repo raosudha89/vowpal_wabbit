@@ -22,7 +22,7 @@ struct task_data
   uint32_t amr_num_concept;
   v_array<uint32_t> valid_actions, action_loss, stack, temp, valid_action_temp, gold_concepts, concepts;
   v_array<vector<uint32_t>> gold_heads, heads, gold_tags, tags;
-  v_array<action> gold_actions, gold_action_temp, valid_tags, valid_concepts;
+  v_array<action> gold_actions, gold_action_temp;
   v_array<pair<action, float>> gold_action_losses;
   v_array<uint32_t> children[6]; // [0]:num_left_arcs, [1]:num_right_arcs; [2]: leftmost_arc, [3]: second_leftmost_arc, [4]:rightmost_arc, [5]: second_rightmost_arc
   example * ec_buf[13];
@@ -58,7 +58,7 @@ bool contains(vector<uint32_t> v, uint32_t x)
            return false;
 }
 
-void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map& vm)
+void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
   data->action_loss.resize(NUM_ACTIONS+1);
@@ -88,20 +88,14 @@ void initialize(Search::search& sch, size_t& /*num_actions*/, po::variables_map&
 
   sch.set_num_learners(NUM_LEARNERS);
 
-  data->valid_tags = v_init<action>();
-  for (action a=1; a<data->amr_num_label; a++)
-    data->valid_tags.push_back(a);
-  
-  data->valid_concepts = v_init<action>();
-  for (action a=1; a<data->amr_num_concept; a++)
-    data->valid_concepts.push_back(a);
-  
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
   vector<string> newpairs(pair, pair+19);
   vector<string> newtriples(triple, triple+12);
   all.pairs.swap(newpairs);
   all.triples.swap(newtriples);
+
+  num_actions = max(max(data->amr_num_label, data->amr_num_concept), SHIFT);
 
   for (v_string& i : all.interactions)
     i.delete_v();
@@ -129,8 +123,6 @@ void finish(Search::search& sch)
   data->temp.delete_v();
   data->action_loss.delete_v();
   data->gold_actions.delete_v();
-  data->valid_tags.delete_v();
-  data->valid_concepts.delete_v();
   data->gold_action_losses.delete_v();
   data->gold_action_temp.delete_v();
   VW::dealloc_example(COST_SENSITIVE::cs_label.delete_label, *data->ex);
@@ -603,8 +595,6 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<uint32_t> &stack=data->stack, &valid_actions=data->valid_actions, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<vector<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   v_array<action> &gold_actions = data->gold_actions;
-  v_array<action>& valid_tags = data->valid_tags;
-  v_array<action>& valid_concepts = data->valid_concepts;
   uint64_t n = (uint64_t) ec.size();
   //cdbg << "n " << n << endl;
   stack.erase();
@@ -656,7 +646,7 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_concept)
-              .set_allowed(valid_concepts)
+              .set_max_allowed(data->amr_num_concept)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
@@ -671,7 +661,7 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
-              .set_allowed(valid_tags)
+              .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
@@ -691,7 +681,7 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
-              .set_allowed(valid_tags)
+              .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
@@ -709,7 +699,7 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
-              .set_allowed(valid_tags)
+              .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
@@ -726,7 +716,7 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
-              .set_allowed(valid_tags)
+              .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
