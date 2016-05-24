@@ -74,7 +74,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   else
     sch.set_num_learners(3);
 
-  num_actions = (data->num_label > 3) ? data->num_label : 3;
+  //num_actions = (data->num_label > 3) ? data->num_label : 3;
   
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
@@ -529,7 +529,7 @@ void run(Search::search& sch, vector<example*>& ec)
         { t_id = P.set_tag((ptag) count)
                  .set_input(*(data->ex))
                  .set_oracle(gold_label)
-                 .erase_alloweds()
+                 .set_max_allowed(data->num_label)
                  .set_condition_range(count-1, sch.get_history_length(), 'p')
                  .set_learner_id(a_id-1)
                  .predict();
