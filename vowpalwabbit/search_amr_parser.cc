@@ -117,8 +117,8 @@ void finish(Search::search& sch)
   data->valid_action_temp.delete_v();
   for (auto&x: data->gold_heads) x.delete_v();
   for (auto&x: data->gold_tags) x.delete_v();
-  for (auto&x: data->heads) x.delete_v();
-  for (auto&x: data->tags) x.delete_v();
+  for (auto*x = data->heads.begin(); x != data->heads.end_array; ++x) x->delete_v();
+  for (auto*x = data->tags.begin(); x != data->tags.end_array; ++x) x->delete_v();
   data->gold_heads.delete_v();
   data->gold_tags.delete_v();
   data->gold_concepts.delete_v();
@@ -548,25 +548,33 @@ void setup(Search::search& sch, vector<example*>& ec)
   v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   size_t n = ec.size();
   v_array<uint32_t> empty_array = v_init<uint32_t>();
+  
   for (auto&x: heads) x.delete_v();
   heads.erase();
   heads.resize(n+1);
+  
   for (auto&x: tags) x.delete_v();
   tags.erase();
   tags.resize(n+1);
+  
   heads[0] = v_init<uint32_t>();
   tags[0] = v_init<uint32_t>();
+
   concepts.resize(n+1);
+  
   for (auto&x: gold_heads) x.delete_v();
   gold_heads.erase();
   gold_heads.push_back(empty_array);
   gold_heads[0].push_back(0);
+  
   for (auto&x: gold_tags) x.delete_v();
   gold_tags.erase();
   gold_tags.push_back(empty_array);
   gold_tags[0].push_back(0);
+  
   gold_concepts.erase();
   gold_concepts.push_back(0);
+  
   for (size_t i=0; i<n; i++)
   { v_array<COST_SENSITIVE::wclass>& costs = ec[i]->l.cs.costs;
     v_array<uint32_t> head = v_init<uint32_t>();
