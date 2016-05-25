@@ -87,7 +87,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
     data->ex->indices.push_back((unsigned char)i+'A');
   data->ex->indices.push_back(constant_namespace);
 
-  sch.set_num_learners({false, false, false, false, false, false, true});
+  sch.set_num_learners({false, false, false, false, false, true, false});
   sch.ldf_alloc(MAX_SENT_LEN);
 
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
@@ -106,7 +106,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
     all.interactions.push_back(string2v_string(i));
   for (string& i : all.triples)
     all.interactions.push_back(string2v_string(i));
-  sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING );
+  sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING | IS_MIXED_LDF);
 
   sch.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
 }
@@ -762,20 +762,21 @@ void run(Search::search& sch, vector<example*>& ec)
       for (uint32_t i=1; i<idx; i++)
       { if (tags[i].size() >  0) //node is already assigned a parent
         { example* ldf_ec = sch.ldf_example(ldf_id);
-          sch.ldf_set_label(ldf_id, idx);
+          sch.ldf_set_label(ldf_id, i);
           VW::clear_example_data(*ldf_ec);  // erase whatever is in there
           VW::copy_example_data(false, ldf_ec, data->ex);  // copy the current parser state
-          LabelDict::add_example_namespace_from_memory(concept_to_features, *ldf_ec, idx, 'h');  // put memory features into namespace 'h'
+          LabelDict::add_example_namespace_from_memory(concept_to_features, *ldf_ec, i, 'h');  // put memory features into namespace 'h'
           // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
           valid_ids.push_back(i);
-          if (contains(heads[i], stack.last()))
-           gold_ids.push_back(idx);
+          if (contains(gold_heads[i], stack.last()) && !contains(heads[i], stack.last()))
+           gold_ids.push_back(i);
           ldf_id++; 
         }
       }      
       cdbg << "ldf_id " << ldf_id << endl;
       cdbg << "valid_ids " << valid_ids << endl;
       cdbg << "gold_ids " << gold_ids << endl;
+      cdbg << "stack.last() " << stack.last() << endl;
       t_id = P.set_tag((ptag) count)
               .set_input(sch.ldf_example(), ldf_id)
               .set_oracle(gold_ids)
