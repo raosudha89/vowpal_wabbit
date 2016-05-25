@@ -133,7 +133,7 @@ void finish(Search::search& sch)
   data->gold_action_temp.delete_v();
   VW::dealloc_example(COST_SENSITIVE::cs_label.delete_label, *data->ex);
   free(data->ex);
-  LabelDict::free_label_features(data->concept_to_features, true);
+  LabelDict::free_label_features(data->concept_to_features);
   data->concept_to_features.delete_v();
   for (size_t i=0; i<6; i++) data->children[i].delete_v();
   delete data;
@@ -319,7 +319,8 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
      stack.push_back(t_id);
      return idx; 
    }
-  THROW("transition_hybrid failed");
+  assert(false);
+  THROW("transition_hybrid failed on a_id=" << a_id);
 }
 
 void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
@@ -610,7 +611,7 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   v_array<action> &gold_actions = data->gold_actions;
   LabelDict::label_feature_map& concept_to_features = data->concept_to_features;
-  LabelDict::free_label_features(data->concept_to_features, true);
+  LabelDict::free_label_features(data->concept_to_features);
   concept_to_features.clear(); // erase current set of concepts
   uint64_t n = (uint64_t) ec.size();
   //cdbg << "n " << n << endl;
@@ -721,6 +722,7 @@ void run(Search::search& sch, vector<example*>& ec)
       for (size_t j=0; j< gold_heads[last].size(); j++)
         if (gold_heads[last][j] == third_last)
           gold_label = gold_tags[last][j];
+      assert(gold_label > 0);
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)

@@ -93,14 +93,13 @@ void set_label_features(label_feature_map& lfm, size_t lab, example& ec)
   set_label_features(lfm, lab, fs0);
 }
 
-void free_label_features(label_feature_map& lfm, bool free_feature_structs)
+void free_label_features(label_feature_map& lfm)
 { void* label_iter = lfm.iterator();
   while (label_iter != nullptr)
   { features *res = lfm.iterator_get_value(label_iter);
     res->values.delete_v();
     res->indicies.delete_v();
     res->space_names.delete_v();
-    //if (free_feature_structs) delete res;
 
     label_iter = lfm.iterator_next(label_iter);
   }

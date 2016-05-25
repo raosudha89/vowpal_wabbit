@@ -981,9 +981,10 @@ action single_prediction_notLDF(search_private& priv, example& ec, int policy, c
   if (priv.global_is_mixed_ldf) ec.skip_reduction_layer = 1;
   
   cdbg << "allowed_actions_cnt=" << allowed_actions_cnt << ", ec.l = ["; for (size_t i=0; i<ec.l.cs.costs.size(); i++) cdbg << ' ' << ec.l.cs.costs[i].class_index << ':' << ec.l.cs.costs[i].x; cdbg << " ]" << endl;
-
+  cdbg << "ec.skip_reduction_layer = " << ec.skip_reduction_layer << endl;
   priv.base_learner->predict(ec, policy);
   uint32_t act = ec.pred.multiclass;
+  assert(act > 0);
   cdbg << "a=" << act << " from"; if (allowed_actions) { for (size_t ii=0; ii<allowed_actions_cnt; ii++) cdbg << ' ' << allowed_actions[ii]; } cdbg << endl;
   a_cost = ec.partial_prediction;
   cdbg << "a_cost = " << a_cost << endl;
@@ -2814,6 +2815,7 @@ void search::execute_set_options(uint32_t opts)
   set_option_bit(opts, IS_MIXED_LDF           , this->priv->is_mixed_ldf);
   set_option_bit(opts, NO_CACHING             , this->priv->no_caching);
   set_option_bit(opts, ACTION_COSTS           , this->priv->use_action_costs);
+  if (this->priv->is_mixed_ldf) this->priv->global_is_mixed_ldf = true;
 }
   
 void  search::set_options(uint32_t opts)
