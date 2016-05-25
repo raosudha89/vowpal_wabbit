@@ -1,0 +1,23 @@
+1       2.      	UNK	0       NOEDGE  NULL
+2       Choose  	UNK     0       ROOT    choose-01
+3       100     	UNK     5       quant   100
+4       innovative      UNK     5       ARG1-of	innovate-01
+5       concepts        UNK     2       ARG1    concept
+6       to      	UNK	0       NOEDGE  NULL
+7       encourage       UNK     2       purpose	encourage-01
+8       employees       UNK     8	ARG0    person
+8       employees       UNK     11	ARG0    person
+8       employees       UNK     13	ARG0    person
+8       employees       UNK     16	ARG0    person
+9	to      	UNK	0       NOEDGE  NULL
+10      conduct         UNK	0       NOEDGE  NULL
+11      research        UNK     12      op1     research-01
+12      and     	UNK     8       ARG2    and
+13      development     UNK     12      op2     develop-02
+14      during  	UNK	0       NOEDGE  NULL
+15      their   	UNK	0       NOEDGE  NULL
+16      work    	UNK     18      op1     work-01
+17      time    	UNK     18      op2     time
+18      or      	UNK     12      time    or
+19      spare   	UNK     17      mod     spare
+
