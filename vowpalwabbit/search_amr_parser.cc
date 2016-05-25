@@ -618,6 +618,7 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<uint32_t> &stack=data->stack, &valid_actions=data->valid_actions, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   v_array<action> &gold_actions = data->gold_actions;
+  v_array<uint32_t> gold_ids = v_init<uint32_t>();
   LabelDict::label_feature_map& concept_to_features = data->concept_to_features;
   LabelDict::free_label_features(data->concept_to_features);
   concept_to_features.clear(); // erase current set of concepts
@@ -818,7 +819,7 @@ void run(Search::search& sch, vector<example*>& ec)
       //   // then we want to make a prediction
       //   pred_id = P.set_input(sch.ldf_example, ldf_id).set_oracle(gold_ids).(blah blah blah).predict()
       // old stuff follows
-      v_array<uint32_t> gold_ids = v_init<uint32_t>();
+      gold_ids.erase();
       size_t ldf_id = 0;
       for (uint32_t i=1; i<idx; i++)
       { if (tags[i].size() >  0) //node is already assigned a parent
@@ -893,5 +894,6 @@ void run(Search::search& sch, vector<example*>& ec)
       }
     }
   valid_tags.delete_v();
+  gold_ids.delete_v();
 }
 }
