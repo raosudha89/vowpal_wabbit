@@ -725,9 +725,8 @@ void run(Search::search& sch, vector<example*>& ec)
       if(gold_label == 0)
       { t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
-              .set_allowed(valid_tags)
               .erase_oracles()
-              //.set_max_allowed(data->amr_num_label)
+              .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
@@ -736,8 +735,7 @@ void run(Search::search& sch, vector<example*>& ec)
       { t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
-              .set_allowed(valid_tags)
-              //.set_max_allowed(data->amr_num_label)
+              .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
@@ -820,25 +818,23 @@ void run(Search::search& sch, vector<example*>& ec)
       //   // then we want to make a prediction
       //   pred_id = P.set_input(sch.ldf_example, ldf_id).set_oracle(gold_ids).(blah blah blah).predict()
       // old stuff follows
-      v_array<uint32_t> valid_ids = v_init<uint32_t>();
       v_array<uint32_t> gold_ids = v_init<uint32_t>();
       size_t ldf_id = 0;
       for (uint32_t i=1; i<idx; i++)
       { if (tags[i].size() >  0) //node is already assigned a parent
         { example* ldf_ec = sch.ldf_example(ldf_id);
           sch.ldf_set_label(ldf_id, i);
+          cdbg << "(ldf_id, i) " << ldf_id << "," << i << endl;
           VW::clear_example_data(*ldf_ec);  // erase whatever is in there
           VW::copy_example_data(false, ldf_ec, data->ex);  // copy the current parser state
           LabelDict::add_example_namespace_from_memory(concept_to_features, *ldf_ec, i, 'h');  // put memory features into namespace 'h'
           // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
-          valid_ids.push_back(i);
           if (contains(gold_heads[i], stack.last()) && !contains(heads[i], stack.last()))
             gold_ids.push_back(ldf_id);
           ldf_id++; 
         }
       }      
       cdbg << "ldf_id " << ldf_id << endl;
-      cdbg << "valid_ids " << valid_ids << endl;
       cdbg << "gold_ids " << gold_ids << endl;
       cdbg << "stack.last() " << stack.last() << endl;
       t_id = P.set_tag((ptag) count)
@@ -847,6 +843,7 @@ void run(Search::search& sch, vector<example*>& ec)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      cdbg << "t_id " << t_id << endl;
       t_id = sch.ldf_get_label(t_id);
       cdbg << "Predicted t_id " << t_id << endl;
       count++;
