@@ -130,6 +130,7 @@ void finish(Search::search& sch)
   VW::dealloc_example(COST_SENSITIVE::cs_label.delete_label, *data->ex);
   free(data->ex);
   LabelDict::free_label_features(data->concept_to_features, true);
+  data->concept_to_features.delete_v();
   for (size_t i=0; i<6; i++) data->children[i].delete_v();
   delete data;
 }
@@ -599,6 +600,7 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<vector<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   v_array<action> &gold_actions = data->gold_actions;
   LabelDict::label_feature_map& concept_to_features = data->concept_to_features;
+  LabelDict::free_label_features(data->concept_to_features, true);
   concept_to_features.clear(); // erase current set of concepts
   uint64_t n = (uint64_t) ec.size();
   //cdbg << "n " << n << endl;

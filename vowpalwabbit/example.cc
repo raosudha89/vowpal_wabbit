@@ -189,4 +189,33 @@ void dealloc_example(void(*delete_label)(void*), example&ec, void(*delete_predic
 
   ec.indices.delete_v();
 }
+
+void clear_example_data(example&ec)
+{ ec.weight = 0.;
+  ec.tag.erase();
+  ec.example_counter = 0;
+  ec.indices.erase();
+  for (size_t i=0; i<256; i++)
+  { ec.feature_space[i].values.erase();
+    ec.feature_space[i].indicies.erase();
+    ec.feature_space[i].space_names.erase();
+  }
+  ec.ft_offset = 0;
+  ec.skip_reduction_layer = 0;
+  ec.num_features = 0;
+  ec.partial_prediction = 0.;
+  ec.updated_prediction = 0.;
+  ec.topic_predictions.erase();
+  ec.loss = 0.;
+  ec.example_t = 0.;
+  ec.total_sum_feat_sq = 0.;
+  ec.confidence = 0.;
+  if (ec.passthrough)
+  { delete ec.passthrough;
+    ec.passthrough = nullptr;
+  }
+  ec.test_only = false;
+  ec.end_pass = false;
+  ec.sorted = false;
+}
 }
