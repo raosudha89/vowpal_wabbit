@@ -2949,7 +2949,7 @@ void search::ldf_set_label(size_t i, action a, float cost)
   }
   else
   { lab.costs[0].x = 0.;
-    lab.costs[0].class_index = (uint64_t)a;
+    lab.costs[0].class_index = (uint64_t)a; // NOTE: TODO why was this +1 before????
     lab.costs[0].partial_prediction = 0.;
     lab.costs[0].wap_value = 0.;
   }
