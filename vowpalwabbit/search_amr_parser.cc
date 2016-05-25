@@ -26,6 +26,7 @@ struct task_data
   v_array<pair<action, float>> gold_action_losses;
   v_array<uint32_t> children[6]; // [0]:num_left_arcs, [1]:num_right_arcs; [2]: leftmost_arc, [3]: second_leftmost_arc, [4]:rightmost_arc, [5]: second_rightmost_arc
   example * ec_buf[13];
+  LabelDict::label_feature_map concept_to_features;
 };
 
 namespace AMRParserTask
@@ -126,6 +127,7 @@ void finish(Search::search& sch)
   data->gold_action_temp.delete_v();
   VW::dealloc_example(COST_SENSITIVE::cs_label.delete_label, *data->ex);
   free(data->ex);
+  LabelDict::free_label_features(data->concept_to_features, true);
   for (size_t i=0; i<6; i++) data->children[i].delete_v();
   delete data;
 }
@@ -595,6 +597,8 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<uint32_t> &stack=data->stack, &valid_actions=data->valid_actions, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<vector<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   v_array<action> &gold_actions = data->gold_actions;
+  LabelDict::label_feature_map& concept_to_features = data->concept_to_features;
+  concept_to_features.clear(); // erase current set of concepts
   uint64_t n = (uint64_t) ec.size();
   //cdbg << "n " << n << endl;
   stack.erase();
@@ -655,6 +659,8 @@ void run(Search::search& sch, vector<example*>& ec)
               .set_learner_id(a_id)
               .predict();
       cdbg << "t_id " << t_id << endl;
+      // for later hallucinations, mark a memory of the features at this concept
+      LabelDict::set_label_features(concept_to_features, idx, *(data->ec));  // TODO: is idx the right place?
     }
     else if (a_id == REDUCE_LEFT)
     { uint32_t gold_label = 0;
@@ -730,7 +736,24 @@ void run(Search::search& sch, vector<example*>& ec)
       cdbg << "t_id " << t_id << endl;
     }
     else if (a_id == HALLUCINATE)
-    { v_array<uint32_t> valid_nodes = v_array<uint32_t>();
+    { // general psuedocode sketch:
+      //   ldf_id = 0
+      //   v_array<uint32_t> gold_ids = v_init<uint32_t>();
+      //   for each idx in the past the corresponds to a valid concept
+      //     example* ldf_ec = *sch.ldf_example(ldf_id);
+      //     ldf_set_label(ldf_id, idx);
+      //     clear_example_data(*ldf_ec);  // erase whatever is in there
+      //     VW::copy_example_data(false, ldf_ec, data->ex);  // copy the current parser state
+      //     LabelDict::add_example_namespace_from_memory(concept_to_features, *ldf_ec, idx, 'h');  // put memory features into namespace 'h'
+      //     // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
+      //     if (this is a correct hallucinate)
+      //       gold_ids.push_back(idx);
+      //     ldf_id++;
+      //   // then we want to make a prediction
+      //   pred_id = P.set_input(sch.ldf_example, ldf_id).set_oracle(gold_ids).(blah blah blah).predict()
+      
+      // old stuff follows
+      v_array<uint32_t> valid_nodes = v_array<uint32_t>();
       v_array<uint32_t> is_gold = v_array<uint32_t>();
       for (uint32_t i=1; i<idx; i++)
       { if (tags[i].size() >  0) //node is already assigned a parent
