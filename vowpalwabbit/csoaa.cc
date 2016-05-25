@@ -52,7 +52,7 @@ inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
   { score = ec.partial_prediction;
     prediction = i;
   }
-  cerr << "csoaa::inner_loop i=" << i << " partial_prediction=" << partial_prediction << " final_prediction=" << prediction << endl;
+  //cerr << "csoaa::inner_loop i=" << i << " partial_prediction=" << partial_prediction << " final_prediction=" << prediction << endl;
   if (ec.passthrough) add_passthrough_feature(ec, i, ec.partial_prediction);
 }
 
@@ -88,7 +88,7 @@ void predict_or_learn(csoaa& c, base_learner& base, example& ec)
   size_t pt_start = ec.passthrough ? ec.passthrough->size() : 0;
   ec.l.simple = { 0., 0., c.initial };
 
-  cerr << "csoaa::predict_or_learn ld.costs.size()=" << ld.costs.size() << endl;
+  //cerr << "csoaa::predict_or_learn ld.costs.size()=" << ld.costs.size() << endl;
   if (ld.costs.size() > 0)
   { bool predicted = maybe_do_multipredict(c, base, ec, ld);
     for (auto& cl : ld.costs)

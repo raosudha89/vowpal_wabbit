@@ -683,13 +683,23 @@ void run(Search::search& sch, vector<example*>& ec)
       for (size_t j=0; j< gold_heads[last].size(); j++)
         if (gold_heads[last][j] == idx)
           gold_label = gold_tags[last][j];
-      t_id = P.set_tag((ptag) count)
+      if(gold_label == 0)
+      { t_id = P.set_tag((ptag) count)
+              .set_input(*(data->ex))
+              .set_max_allowed(data->amr_num_label)
+              .set_condition_range(count-1, sch.get_history_length(), 'p')
+              .set_learner_id(a_id)
+              .predict();
+      }
+      else
+      { t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
               .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      }
       cdbg << "REDUCE_LEFT" << endl;
       cdbg << "gold_label " << gold_label << endl;
       cdbg << "t_id " << t_id << endl;
@@ -703,7 +713,17 @@ void run(Search::search& sch, vector<example*>& ec)
       for (size_t j=0; j< gold_heads[last].size(); j++)
         if (gold_heads[last][j] == second_last)
           gold_label = gold_tags[last][j];
-      t_id = P.set_tag((ptag) count)
+      if(gold_label == 0)
+      { t_id = P.set_tag((ptag) count)
+              .set_input(*(data->ex))
+              .set_allowed(valid_tags)
+              //.set_max_allowed(data->amr_num_label)
+              .set_condition_range(count-1, sch.get_history_length(), 'p')
+              .set_learner_id(a_id)
+              .predict();
+      }
+      else
+      { t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
               .set_allowed(valid_tags)
@@ -711,6 +731,7 @@ void run(Search::search& sch, vector<example*>& ec)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      }
       cdbg << "REDUCE_RIGHT" << endl;
       cdbg << "gold_label " << gold_label << endl;
       cdbg << "t_id " << t_id << endl;
@@ -722,14 +743,23 @@ void run(Search::search& sch, vector<example*>& ec)
       for (size_t j=0; j< gold_heads[last].size(); j++)
         if (gold_heads[last][j] == third_last)
           gold_label = gold_tags[last][j];
-      assert(gold_label > 0);
-      t_id = P.set_tag((ptag) count)
+      if(gold_label == 0)
+      { t_id = P.set_tag((ptag) count)
+              .set_input(*(data->ex))
+              .set_max_allowed(data->amr_num_label)
+              .set_condition_range(count-1, sch.get_history_length(), 'p')
+              .set_learner_id(a_id)
+              .predict();
+      }
+      else
+      { t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
               .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      }
       cdbg << "SWAP_REDUCE_RIGHT" << endl;
       cdbg << "gold_label " << gold_label << endl;
       cdbg << "t_id " << t_id << endl;
@@ -740,13 +770,23 @@ void run(Search::search& sch, vector<example*>& ec)
       for (size_t j=0; j< gold_heads[second_last].size(); j++)
         if (gold_heads[second_last][j] == idx)
           gold_label = gold_tags[second_last][j];
-      t_id = P.set_tag((ptag) count)
+      if(gold_label == 0)
+      { t_id = P.set_tag((ptag) count)
+              .set_input(*(data->ex))
+              .set_max_allowed(data->amr_num_label)
+              .set_condition_range(count-1, sch.get_history_length(), 'p')
+              .set_learner_id(a_id)
+              .predict();
+      }
+      else
+      { t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
               .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      }
       cdbg << "SWAP_REDUCE_LEFT" << endl;
       cdbg << "gold_label " << gold_label << endl;
       cdbg << "t_id " << t_id << endl;
@@ -804,13 +844,23 @@ void run(Search::search& sch, vector<example*>& ec)
       for (size_t j=0; j<gold_heads[t_id].size(); j++)
         if (gold_heads[t_id][j] == stack.last())
           gold_label = gold_tags[t_id][j];
-      t_id = P.set_tag((ptag) count)
+      if(gold_label == 0)
+      { t_id = P.set_tag((ptag) count)
+              .set_input(*(data->ex))
+              .set_max_allowed(data->amr_num_label)
+              .set_condition_range(count-1, sch.get_history_length(), 'p')
+              .set_learner_id(a_id)
+              .predict();
+      }
+      else
+      { t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_label)
               .set_max_allowed(data->amr_num_label)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      }
     }
     count++;
     idx = transition_hybrid(sch, a_id, idx, t_id);
