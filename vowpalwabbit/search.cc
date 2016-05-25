@@ -768,7 +768,11 @@ inline float cs_get_cost_partial_prediction(bool isCB, polylabel& ld, size_t k)
 
 inline void cs_set_cost_loss(bool isCB, polylabel& ld, size_t k, float val)
 { if (isCB) ld.cb.costs[k].cost = val;
-  else      ld.cs.costs[k].x    = val;
+  else
+  { assert(k >= 0);
+    assert(k < ld.cs.costs.size());
+    ld.cs.costs[k].x    = val;
+  }
 }
 
 inline void cs_costs_erase(bool isCB, polylabel& ld)
