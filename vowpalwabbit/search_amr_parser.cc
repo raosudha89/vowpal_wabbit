@@ -38,15 +38,16 @@ const action REDUCE_RIGHT         = 2;
 const action REDUCE_LEFT          = 3;
 const action SWAP_REDUCE_RIGHT	  = 4;
 const action SWAP_REDUCE_LEFT 	  = 5;
-const action SHIFT 		  = 6;
-const action HALLUCINATE          = 7;
+const action HALLUCINATE          = 6;
+const action SHIFT 		  = 7;
 
 const int NUM_ACTIONS = 7;
-const int NUM_LEARNERS = 7;
+//const int NUM_LEARNERS = 7;
 const int NULL_CONCEPT = 1;
 const int NO_HEAD = 0; //this is not predicted and hence can be 0
 const int NO_EDGE = 0; //this is not predicted and hence can be 0
 const int ROOT = 0;
+const int MAX_SENT_LEN = 100;
 
 bool contains(v_array<uint32_t> v, uint32_t x)
 {
@@ -86,7 +87,8 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
     data->ex->indices.push_back((unsigned char)i+'A');
   data->ex->indices.push_back(constant_namespace);
 
-  sch.set_num_learners(NUM_LEARNERS);
+  sch.set_num_learners({false, false, false, false, false, false, true});
+  sch.ldf_alloc(MAX_SENT_LEN);
 
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
@@ -104,7 +106,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
     all.interactions.push_back(string2v_string(i));
   for (string& i : all.triples)
     all.interactions.push_back(string2v_string(i));
-  sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING );
+  sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING | IS_MIXED_LDF);
 
   sch.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
 }
@@ -412,9 +414,6 @@ void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t 
     valid_action.push_back( SWAP_REDUCE_LEFT);
   if(stack_depth >=1 && state!=0)
     valid_action.push_back( HALLUCINATE);
-  //cdbg << "GET_VALID_ACTIONS" << endl;
-  //cdbg << "concepts[idx] " << concepts[idx] << endl;
-  //cdbg << "valid_actions " << valid_action << endl;
 }
 
 bool is_valid(uint64_t action, v_array<uint32_t> valid_actions)
@@ -554,6 +553,8 @@ void setup(Search::search& sch, vector<example*>& ec)
   for (auto&x: tags) x.delete_v();
   tags.erase();
   tags.resize(n+1);
+  heads[0] = v_init<uint32_t>();
+  tags[0] = v_init<uint32_t>();
   concepts.resize(n+1);
   for (auto&x: gold_heads) x.delete_v();
   gold_heads.erase();
@@ -618,6 +619,7 @@ void run(Search::search& sch, vector<example*>& ec)
   { concepts[i] = 0;
     heads[i].erase();
     tags[i].erase();
+    cdbg << "gold_tags[i] " << gold_tags[i][0] << endl;
   }
   //cdbg << "stack_size" << stack.size() << endl;
   stack.push_back(ROOT); //if ROOT is pushed into stack then what prevents an AMR from having two roots?
@@ -672,7 +674,7 @@ void run(Search::search& sch, vector<example*>& ec)
               .predict();
       cdbg << "t_id " << t_id << endl;
       // for later hallucinations, mark a memory of the features at this concept
-      LabelDict::set_label_features(concept_to_features, idx, *(data->ex));  // TODO: is idx the right place?
+      LabelDict::set_label_features(concept_to_features, idx, *(data->ex));  // TODO: is idx the right place? -- Yes
     }
     else if (a_id == REDUCE_LEFT)
     { uint32_t gold_label = 0;
@@ -763,26 +765,36 @@ void run(Search::search& sch, vector<example*>& ec)
       //     ldf_id++;
       //   // then we want to make a prediction
       //   pred_id = P.set_input(sch.ldf_example, ldf_id).set_oracle(gold_ids).(blah blah blah).predict()
-      
       // old stuff follows
-      v_array<uint32_t> valid_nodes = v_init<uint32_t>();
-      v_array<uint32_t> is_gold = v_init<uint32_t>();
+      v_array<uint32_t> valid_ids = v_init<uint32_t>();
+      v_array<uint32_t> gold_ids = v_init<uint32_t>();
+      size_t ldf_id = 0;
       for (uint32_t i=1; i<idx; i++)
       { if (tags[i].size() >  0) //node is already assigned a parent
-        { valid_nodes.push_back(i);
-          if (contains(heads[i], stack.last()))
-            is_gold.push_back(1);
-          else
-            is_gold.push_back(0); 
+        { example* ldf_ec = sch.ldf_example(ldf_id);
+          sch.ldf_set_label(ldf_id, i);
+          VW::clear_example_data(*ldf_ec);  // erase whatever is in there
+          VW::copy_example_data(false, ldf_ec, data->ex);  // copy the current parser state
+          LabelDict::add_example_namespace_from_memory(concept_to_features, *ldf_ec, i, 'h');  // put memory features into namespace 'h'
+          // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
+          valid_ids.push_back(i);
+          if (contains(gold_heads[i], stack.last()) && !contains(heads[i], stack.last()))
+           gold_ids.push_back(i);
+          ldf_id++; 
         }
-      } 
+      }      
+      cdbg << "ldf_id " << ldf_id << endl;
+      cdbg << "valid_ids " << valid_ids << endl;
+      cdbg << "gold_ids " << gold_ids << endl;
+      cdbg << "stack.last() " << stack.last() << endl;
       t_id = P.set_tag((ptag) count)
-              .set_input(*(data->ex))
-              .set_oracle(is_gold)
-              .set_allowed(valid_nodes)
+              .set_input(sch.ldf_example(), ldf_id)
+              .set_oracle(gold_ids)
+              .set_allowed(valid_ids)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      cdbg << "Predicted t_id " << t_id << endl;
       count++;
       idx = transition_hybrid(sch, a_id, idx, t_id);
       a_id = REDUCE_RIGHT;
