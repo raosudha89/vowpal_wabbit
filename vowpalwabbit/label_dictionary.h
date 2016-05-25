@@ -7,11 +7,12 @@ void add_example_namespace(example& ec, char ns, features& fs);
 void del_example_namespace(example& ec, char ns, features& fs);
 
 void set_label_features(label_feature_map& lfm, size_t lab, features& fs);
+void set_label_features(label_feature_map& lfm, size_t lab, example&  ec);
 
 void add_example_namespaces_from_example(example& target, example& source);
 void del_example_namespaces_from_example(example& target, example& source);
 void add_example_namespace_from_memory(label_feature_map& lfm, example& ec, size_t lab);
 void del_example_namespace_from_memory(label_feature_map& lfm, example& ec, size_t lab);
 
-void free_label_features(label_feature_map& lfm);
+void free_label_features(label_feature_map& lfm, bool free_feature_structs=false);
 }
