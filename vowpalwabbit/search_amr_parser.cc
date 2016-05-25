@@ -549,12 +549,9 @@ void setup(Search::search& sch, vector<example*>& ec)
   size_t n = ec.size();
   v_array<uint32_t> empty_array = v_init<uint32_t>();
   
-  for (auto&x: heads) x.delete_v();
-  heads.erase();
+  for (auto*x = data->heads.begin(); x != data->heads.end_array; ++x) x->delete_v();
+  for (auto*x = data->tags.begin(); x != data->tags.end_array; ++x) x->delete_v();
   heads.resize(n+1);
-  
-  for (auto&x: tags) x.delete_v();
-  tags.erase();
   tags.resize(n+1);
   
   heads[0] = v_init<uint32_t>();
@@ -627,8 +624,8 @@ void run(Search::search& sch, vector<example*>& ec)
   stack.erase();
   for (size_t i=0; i<=n; i++)
   { concepts[i] = 0;
-    heads[i].erase();
-    tags[i].erase();
+    heads[i].delete_v();
+    tags[i].delete_v();
     cdbg << "gold_tags[i] " << gold_tags[i][0] << endl;
   }
   //cdbg << "stack_size" << stack.size() << endl;
