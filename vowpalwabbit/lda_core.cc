@@ -35,6 +35,11 @@ license as described in the file LICENSE.
 #include <boost/align/is_aligned.hpp>
 #endif
 
+#ifndef BOOST_NO_STATIC_ASSERT
+#  define BOOST_STATIC_ASSERT_MSG( B, Msg ) static_assert(B, Msg)
+#else
+#  define BOOST_STATIC_ASSERT_MSG( B, Msg ) BOOST_STATIC_ASSERT( B )
+#endif 
 
 enum lda_math_mode { USE_SIMD, USE_PRECISE, USE_FAST_APPROX };
 
