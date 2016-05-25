@@ -21,7 +21,7 @@ struct task_data
   uint32_t amr_num_label;
   uint32_t amr_num_concept;
   v_array<uint32_t> valid_actions, action_loss, stack, temp, valid_action_temp, gold_concepts, concepts;
-  v_array<vector<uint32_t>> gold_heads, heads, gold_tags, tags;
+  v_array<v_array<uint32_t>> gold_heads, heads, gold_tags, tags;
   v_array<action> gold_actions, gold_action_temp;
   v_array<pair<action, float>> gold_action_losses;
   v_array<uint32_t> children[6]; // [0]:num_left_arcs, [1]:num_right_arcs; [2]: leftmost_arc, [3]: second_leftmost_arc, [4]:rightmost_arc, [5]: second_rightmost_arc
@@ -48,7 +48,7 @@ const int NO_HEAD = 0; //this is not predicted and hence can be 0
 const int NO_EDGE = 0; //this is not predicted and hence can be 0
 const int ROOT = 0;
 
-bool contains(vector<uint32_t> v, uint32_t x)
+bool contains(v_array<uint32_t> v, uint32_t x)
 {
       if (v.empty())
            return false;
@@ -110,9 +110,13 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 }
 
 void finish(Search::search& sch)
-{ task_data *data = sch.get_task_data<task_data>();
+{ task_data* data = sch.get_task_data<task_data>();
   data->valid_actions.delete_v();
   data->valid_action_temp.delete_v();
+  for (auto&x: data->gold_heads) x.delete_v();
+  for (auto&x: data->gold_tags) x.delete_v();
+  for (auto&x: data->heads) x.delete_v();
+  for (auto&x: data->tags) x.delete_v();
   data->gold_heads.delete_v();
   data->gold_tags.delete_v();
   data->gold_concepts.delete_v();
@@ -158,7 +162,7 @@ void inline reset_ex(example *ex)
 size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint32_t t_id)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &stack=data->stack, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
-  v_array<vector<uint32_t>> &heads=data->heads, &gold_heads=data->gold_heads, &gold_tags=data->gold_tags, &tags = data->tags;
+  v_array<v_array<uint32_t>> &heads=data->heads, &gold_heads=data->gold_heads, &gold_tags=data->gold_tags, &tags = data->tags;
   v_array<uint32_t> *children = data->children;
   if (a_id == MAKE_CONCEPT)
   { concepts[idx] = t_id;
@@ -323,7 +327,7 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
   uint64_t mask = sch.get_mask();
   uint64_t multiplier = all.wpp << all.reg.stride_shift;
   v_array<uint32_t> &stack = data->stack, *children = data->children, &temp=data->temp;
-  v_array<vector<uint32_t>> &tags = data->tags;
+  //v_array<v_array<uint32_t>> &tags = data->tags;
   example **ec_buf = data->ec_buf;
   example &ex = *(data->ex);
 
@@ -424,7 +428,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
 { gold_actions.erase();
   task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &valid_actions=data->valid_actions;
-  v_array<vector<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads;
+  v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads;
   size_t size = stack.size();
   size_t last = (size==0) ? 0 : stack.last();
   
@@ -541,15 +545,21 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
 void setup(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &gold_concepts=data->gold_concepts, &concepts=data->concepts;
-  v_array<vector<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
+  v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   size_t n = ec.size();
-  vector<uint32_t> empty_array = vector<uint32_t>();
+  v_array<uint32_t> empty_array = v_init<uint32_t>();
+  for (auto&x: heads) x.delete_v();
+  heads.erase();
   heads.resize(n+1);
+  for (auto&x: tags) x.delete_v();
+  tags.erase();
   tags.resize(n+1);
   concepts.resize(n+1);
+  for (auto&x: gold_heads) x.delete_v();
   gold_heads.erase();
   gold_heads.push_back(empty_array);
   gold_heads[0].push_back(0);
+  for (auto&x: gold_tags) x.delete_v();
   gold_tags.erase();
   gold_tags.push_back(empty_array);
   gold_tags[0].push_back(0);
@@ -557,8 +567,8 @@ void setup(Search::search& sch, vector<example*>& ec)
   gold_concepts.push_back(0);
   for (size_t i=0; i<n; i++)
   { v_array<COST_SENSITIVE::wclass>& costs = ec[i]->l.cs.costs;
-    vector<uint32_t> head = vector<uint32_t>();
-    vector<uint32_t> tag = vector<uint32_t>();
+    v_array<uint32_t> head = v_init<uint32_t>();
+    v_array<uint32_t> tag = v_init<uint32_t>();
     size_t h, t, concept;
     h = (costs.size() == 0) ? 0 : costs[0].class_index;
     t = (costs.size() <= 1) ? (uint64_t)data->amr_root_label : costs[1].class_index;
@@ -582,9 +592,9 @@ void setup(Search::search& sch, vector<example*>& ec)
     gold_heads.push_back(head);
     gold_tags.push_back(tag);
     gold_concepts.push_back(concept);
-    heads[i+1] = vector<uint32_t>();
+    heads[i+1] = v_init<uint32_t>();
     //heads[i+1].push_back(0);
-    tags[i+1] = vector<uint32_t>();
+    tags[i+1] = v_init<uint32_t>();
     //tags[i+1].push_back(-1);
     concepts[i+1] = 0;
 
@@ -596,7 +606,7 @@ void setup(Search::search& sch, vector<example*>& ec)
 void run(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &stack=data->stack, &valid_actions=data->valid_actions, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
-  v_array<vector<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
+  v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   v_array<action> &gold_actions = data->gold_actions;
   LabelDict::label_feature_map& concept_to_features = data->concept_to_features;
   LabelDict::free_label_features(data->concept_to_features, true);
@@ -606,8 +616,8 @@ void run(Search::search& sch, vector<example*>& ec)
   stack.erase();
   for (size_t i=0; i<=n; i++)
   { concepts[i] = 0;
-    heads[i].clear();
-    tags[i].clear();
+    heads[i].erase();
+    tags[i].erase();
   }
   //cdbg << "stack_size" << stack.size() << endl;
   stack.push_back(ROOT); //if ROOT is pushed into stack then what prevents an AMR from having two roots?
@@ -619,7 +629,7 @@ void run(Search::search& sch, vector<example*>& ec)
   size_t idx = 1;
   Search::predictor P(sch, (ptag) 0);
 
-  v_array<action> valid_tags = v_array<action>();
+  v_array<action> valid_tags = v_init<action>();
   for (action a=1; a<data->amr_num_label; a++)
     valid_tags.push_back(a);
 
@@ -755,8 +765,8 @@ void run(Search::search& sch, vector<example*>& ec)
       //   pred_id = P.set_input(sch.ldf_example, ldf_id).set_oracle(gold_ids).(blah blah blah).predict()
       
       // old stuff follows
-      v_array<uint32_t> valid_nodes = v_array<uint32_t>();
-      v_array<uint32_t> is_gold = v_array<uint32_t>();
+      v_array<uint32_t> valid_nodes = v_init<uint32_t>();
+      v_array<uint32_t> is_gold = v_init<uint32_t>();
       for (uint32_t i=1; i<idx; i++)
       { if (tags[i].size() >  0) //node is already assigned a parent
         { valid_nodes.push_back(i);
@@ -808,5 +818,6 @@ void run(Search::search& sch, vector<example*>& ec)
         sch.output() <<endl;
       }
     }
+  valid_tags.delete_v();
 }
 }
