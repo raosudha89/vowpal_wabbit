@@ -833,7 +833,7 @@ void run(Search::search& sch, vector<example*>& ec)
           // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
           valid_ids.push_back(i);
           if (contains(gold_heads[i], stack.last()) && !contains(heads[i], stack.last()))
-           gold_ids.push_back(i);
+            gold_ids.push_back(ldf_id);
           ldf_id++; 
         }
       }      
@@ -844,10 +844,10 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = P.set_tag((ptag) count)
               .set_input(sch.ldf_example(), ldf_id)
               .set_oracle(gold_ids)
-              .set_allowed(valid_ids)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
+      t_id = sch.ldf_get_label(t_id);
       cdbg << "Predicted t_id " << t_id << endl;
       count++;
       idx = transition_hybrid(sch, a_id, idx, t_id);
