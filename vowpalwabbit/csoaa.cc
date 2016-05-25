@@ -744,6 +744,7 @@ void end_examples(ldf& data)
 void finish(ldf& data)
 { data.ec_seq.delete_v();
   LabelDict::free_label_features(data.label_features);
+  data.label_features.delete_v();
   data.scores.delete_v();
   data.stored_preds.delete_v();
 }

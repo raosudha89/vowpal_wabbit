@@ -78,16 +78,19 @@ void del_example_namespace_from_memory(label_feature_map& lfm, example& ec, size
 
 void set_label_features(label_feature_map& lfm, size_t lab, features& fs)
 { size_t lab_hash = hash_lab(lab);
-  if (lfm.contains(lab, lab_hash)) return;
+  if (lfm.contains(lab, lab_hash))
+  { cerr << "warning: set_label_features called but label already exists (" << lab << ")" << endl;
+    return;
+  }
   lfm.put_after_get(lab, lab_hash, fs);
 }
 
 void set_label_features(label_feature_map& lfm, size_t lab, example& ec)
-{ features* fs0 = new features();
+{ features fs0; // = new features();
   for (features& fs : ec)
     for (auto& f : fs)
-      fs0->push_back(f.value(), f.index());
-  set_label_features(lfm, lab, *fs0);
+      fs0.push_back(f.value(), f.index());
+  set_label_features(lfm, lab, fs0);
 }
 
 void free_label_features(label_feature_map& lfm, bool free_feature_structs)
@@ -97,11 +100,10 @@ void free_label_features(label_feature_map& lfm, bool free_feature_structs)
     res->values.delete_v();
     res->indicies.delete_v();
     res->space_names.delete_v();
-    if (free_feature_structs) delete res;
+    //if (free_feature_structs) delete res;
 
     label_iter = lfm.iterator_next(label_iter);
   }
   lfm.clear();
-  lfm.delete_v();
 }
 }
