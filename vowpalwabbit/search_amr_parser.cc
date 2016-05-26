@@ -434,7 +434,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   
   if (size >=2 && is_valid(SWAP_REDUCE_LEFT, valid_actions) && contains(gold_heads[stack[size-2]], idx))
   { gold_actions.push_back(SWAP_REDUCE_LEFT);
-    //cdbg << "RET SRL" << endl;
+    cdbg << "RET SRL" << endl;
     return;
   }
 
@@ -446,13 +446,14 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   
   if (is_valid(SHIFT,valid_actions) &&( stack.empty() || contains(gold_heads[idx], last))) // becoz if we take any ohter action, we will lose this edge
   { gold_actions.push_back(SHIFT);
-    //cdbg << "RET S" << endl;
+    cdbg << "RET SH" << endl;
     return;
   }
  
   for (uint32_t i=1; i<idx; i++)
   { if (contains(gold_heads[i], last) && !(contains(heads[i], last)) && !(v_array_contains(stack, i)))
     { gold_actions.push_back(HALLUCINATE);
+      cdbg << "RET HALLUCINATE" << endl;
       return;
     }
   }
@@ -463,20 +464,27 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   }
   action_loss[HALLUCINATE] = 100; // We don't want to hallucinate any other time
 
-  if (size >= 3)
+  //Losses for SHIFT action
+
+  if (size >= 3) 
   { for(size_t i = 0; i<size-2; i++)
       if(idx <=n && (contains(gold_heads[stack[i]], idx) || contains(gold_heads[idx], stack[i])))
-        action_loss[SHIFT] += 1;
+        action_loss[SHIFT] += 1; // Edges to and from idx to anything in stack before size-2 is lost
   }
   if(size>0 && contains(gold_heads[last], idx))
-    action_loss[SHIFT] += 1;
+    action_loss[SHIFT] += 1; //we can't do REDUCE_RIGHT anymore
   if(size>=2 && contains(gold_heads[stack[size-2]], idx))
-    action_loss[SHIFT] += 1;
+    action_loss[SHIFT] += 1; //we can't do SWAP_REDUCE_RIGHT anymore
+
+  //Losses for REDUCE_LEFT action
+
+  if(!contains(gold_heads[last], idx)) //If no such edge exists then add loss
+    action_loss[REDUCE_LEFT] +=1;
 
   if(size>0)
   { for(size_t i = idx+1; i<=n; i++)
       if(contains(gold_heads[i], last) || (contains(gold_heads[last], i) && gold_heads[last].size() == 1))
-        action_loss[REDUCE_LEFT] +=1;
+        action_loss[REDUCE_LEFT] +=1; //Edge to and from last to anyting in buffer is lost
   }
   if(size>0  && idx <=n && contains(gold_heads[idx], last))
     action_loss[REDUCE_LEFT] +=1;
@@ -485,17 +493,27 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   if(size>=3 && contains(gold_heads[last], stack[size-3]) && gold_heads[last].size() == 1) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
     action_loss[REDUCE_LEFT] += 1;
 
+  //Losses for REDUCE_RIGHT action
+
+  if(!contains(gold_heads[last], stack[size-2])) //If no such edge exists then add loss
+    action_loss[REDUCE_RIGHT] +=1;  
+
   if(size>0 && gold_heads[last][0] >=idx && gold_heads[last].size() == 1) // we assume here that every node has only one head. Hallucinated nodes will take care of co-ref
-    action_loss[REDUCE_RIGHT] +=1;
+    action_loss[REDUCE_RIGHT] +=1; //Any heads to last from buffer are lost
   if(size>=3 && contains(gold_heads[last], stack[size-3]) && gold_heads[last].size() == 1)
     action_loss[REDUCE_RIGHT] +=1;
   if(size>0)
   {
     for(size_t i = idx; i<=n; i++)
       if(contains(gold_heads[i], last))
-        action_loss[REDUCE_RIGHT] +=1;
+        action_loss[REDUCE_RIGHT] +=1; //Any dependents of last in buffer are lost
   }
+ 
+  //Losses for SWAP_REDUCE_LEFT action
   
+  if(size>=2 && !contains(gold_heads[stack[size-2]], idx)) //If no such edge exists then add loss
+   action_loss[SWAP_REDUCE_LEFT] +=1;
+ 
   if(size >= 2)
   { if(size>=3 && contains(gold_heads[stack[size-2]], stack[size-3]))
       action_loss[SWAP_REDUCE_LEFT] +=1;
@@ -512,6 +530,11 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
       action_loss[SWAP_REDUCE_LEFT] +=1;
 
   }
+
+  //Losses for SWAP_REDUCE_RIGHT action
+
+  if(size>=3 && !contains(gold_heads[last], stack[size-3])) //If no such edge exists then add loss
+    action_loss[SWAP_REDUCE_RIGHT] +=1;
 
   if(size>0)
   { for(size_t i=idx; i<=n; i++)
@@ -848,9 +871,13 @@ void run(Search::search& sch, vector<example*>& ec)
       idx = transition_hybrid(sch, a_id, idx, t_id);
       a_id = REDUCE_RIGHT;
       uint32_t gold_label = 0;
+      cdbg << "gold_heads[t_id] " << gold_heads[t_id] << endl;
+      cdbg << "gold_tags[t_id] " << gold_tags[t_id] << endl;
+
       for (size_t j=0; j<gold_heads[t_id].size(); j++)
-        if (gold_heads[t_id][j] == stack.last())
+        if (gold_heads[t_id][j] == stack[stack.size()-2])
           gold_label = gold_tags[t_id][j];
+      cdbg << "gold_label " << gold_label << endl;
       if(gold_label == 0)
       { t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
@@ -880,8 +907,7 @@ void run(Search::search& sch, vector<example*>& ec)
     sch.loss(1.f);
   if (sch.output().good())
     for(size_t i=1; i<=n; i++)
-    { cdbg << "size for i=" << i << " is " << heads[i].size() << endl;
-      if(heads[i].size() == 0)
+    { if(heads[i].size() == 0)
        sch.output() << "0:0:" << NULL_CONCEPT << endl; 
       else
       { sch.output() << heads[i][0]<<":"<<tags[i][0]<<":"<<concepts[i]; 
