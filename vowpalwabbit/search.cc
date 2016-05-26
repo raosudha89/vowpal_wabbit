@@ -2446,6 +2446,7 @@ base_learner* setup(vw&all)
   ("search_linear_ordering",                        "insist on generating examples in linear order (def: hoopla permutation)")
   ("search_only_task",         po::value<size_t>(), "only learn this specific task (def: 0 = learn all tasks)")
   ("search_override_hook",                          "in library mode, you might want to override the (eg loaded) task with a hook; this allows that to happen")
+  ("search_force_ref",                              "just use the reference always, don't predict (good for debugging ref)")
   ;
   add_options(all);
   po::variables_map& vm = all.vm;

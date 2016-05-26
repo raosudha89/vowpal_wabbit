@@ -879,7 +879,7 @@ void run(Search::search& sch, vector<example*>& ec)
   if (!contains(gold_heads[stack.last()], 0))
     sch.loss(1.f);
   if (sch.output().good())
-    for(size_t i=1; i<=n; i++)
+  { for(size_t i=1; i<=n; i++)
     { cdbg << "size for i=" << i << " is " << heads[i].size() << endl;
       if(heads[i].size() == 0)
        sch.output() << "0:0:" << NULL_CONCEPT << endl; 
@@ -890,6 +890,8 @@ void run(Search::search& sch, vector<example*>& ec)
         sch.output() <<endl;
       }
     }
+    cdbg << "output = " << endl << sch.output().str() << endl;
+  }
   valid_tags.delete_v();
   gold_ids.delete_v();
 }
