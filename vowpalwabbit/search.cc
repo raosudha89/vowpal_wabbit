@@ -56,7 +56,7 @@ search_metatask* all_metatasks[] =
   nullptr
 };   // must nullptr terminate!
 
-const bool PRINT_UPDATE_EVERY_EXAMPLE =0;
+const bool PRINT_UPDATE_EVERY_EXAMPLE =1;
 const bool PRINT_UPDATE_EVERY_PASS =0;
 const bool PRINT_CLOCK_TIME =0;
 
