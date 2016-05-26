@@ -59,6 +59,14 @@ bool contains(v_array<uint32_t> v, uint32_t x)
            return false;
 }
 
+uint32_t get_count(v_array<uint32_t> v, uint32_t x)
+{ uint32_t ct = 0;
+  for(size_t i=0; i<v.size(); i++)
+    if(v[i] == x)
+      ct += 1;
+  return ct;
+}
+
 void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
@@ -451,7 +459,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   }
  
   for (uint32_t i=1; i<idx; i++)
-  { if (contains(gold_heads[i], last) && !(contains(heads[i], last)) && !(v_array_contains(stack, i)))
+  { if ((get_count(gold_heads[i], last) > get_count(heads[i], last)) && !(v_array_contains(stack, i)))
     { gold_actions.push_back(HALLUCINATE);
       cdbg << "RET HALLUCINATE" << endl;
       return;
@@ -850,7 +858,7 @@ void run(Search::search& sch, vector<example*>& ec)
           VW::copy_example_data(false, ldf_ec, data->ex);  // copy the current parser state
           LabelDict::add_example_namespace_from_memory(concept_to_features, *ldf_ec, i, 'h');  // put memory features into namespace 'h'
           // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
-          if (contains(gold_heads[i], stack.last()) && !contains(heads[i], stack.last()))
+          if (get_count(gold_heads[i], stack.last()) > get_count(heads[i], stack.last()))
             gold_ids.push_back(ldf_id);
           ldf_id++; 
         }
