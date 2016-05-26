@@ -251,9 +251,10 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
 
     assert(! stack.empty());
     stack.pop();
-    stack.push_back(idx);
+    //stack.push_back(idx);
     //cdbg << "RL PUSHED " << idx << endl;
-    return idx+1;
+    //return idx+1;
+    return idx;
   }
   else if (a_id == SWAP_REDUCE_RIGHT)
   {
@@ -318,9 +319,10 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
       sch.loss(0.f);
 
     stack.push_back(last);
-    stack.push_back(idx);
+    //stack.push_back(idx);
     //cdbg << "SRL PUSHED " << idx << endl;
-    return idx+1;
+    //return idx+1;
+    return idx;
    }
    else if (a_id == HALLUCINATE)
    {
@@ -490,12 +492,13 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     action_loss[REDUCE_LEFT] +=1;
 
   if(size>0)
-  { for(size_t i = idx+1; i<=n; i++)
+  { //Edge to and from last to anything in buffer is lost
+    for(size_t i = idx+1; i<=n; i++)
       if(contains(gold_heads[i], last) || (contains(gold_heads[last], i) && gold_heads[last].size() == 1))
-        action_loss[REDUCE_LEFT] +=1; //Edge to and from last to anyting in buffer is lost
+        action_loss[REDUCE_LEFT] +=1; 
+    if(idx <=n && contains(gold_heads[idx], last))
+      action_loss[REDUCE_LEFT] +=1;
   }
-  if(size>0  && idx <=n && contains(gold_heads[idx], last))
-    action_loss[REDUCE_LEFT] +=1;
   if(size>=2 && contains(gold_heads[last], stack[size-2]) && gold_heads[last].size() == 1) //i.e. we can't do REDUCE_RIGHT anymore 
     action_loss[REDUCE_LEFT] += 1;
   if(size>=3 && contains(gold_heads[last], stack[size-3]) && gold_heads[last].size() == 1) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
@@ -524,18 +527,19 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
  
   if(size >= 2)
   { if(size>=3 && contains(gold_heads[stack[size-2]], stack[size-3]))
-      action_loss[SWAP_REDUCE_LEFT] +=1;
+      action_loss[SWAP_REDUCE_LEFT] +=1; //we can't do REDUCE_RIGHT when second_last comes on top of stack anymore
     if(size>=4 && contains(gold_heads[stack[size-2]], stack[size-4]))
-      action_loss[SWAP_REDUCE_LEFT] +=1;
+      action_loss[SWAP_REDUCE_LEFT] +=1; //we can't do SWAP_REDUCE_RIGHT when second_last comes on top of stack anymore
+    //Edges to and from second_last to anything in buffer are lost
     for(size_t i=idx+1; i<=n; i++)
       if( (contains(gold_heads[stack[size-2]], i) && gold_heads[stack[size-2]].size() == 1) || contains(gold_heads[i], stack[size-2]))
         action_loss[SWAP_REDUCE_LEFT] +=1;
     if(contains(gold_heads[idx], stack[size-2]))
-      action_loss[SWAP_REDUCE_LEFT] +=1;
+      action_loss[SWAP_REDUCE_LEFT] +=1; //if idx was child of second_last, we have lost it
     if(contains(gold_heads[stack[size-1]], stack[size-2]))
-      action_loss[SWAP_REDUCE_LEFT] +=1;
-    if(contains(gold_heads[stack[size-1]], idx))
-      action_loss[SWAP_REDUCE_LEFT] +=1;
+      action_loss[SWAP_REDUCE_LEFT] +=1; //if last was child of second_last, we have lost it
+    //if(contains(gold_heads[stack[size-1]], idx))
+    //  action_loss[SWAP_REDUCE_LEFT] +=1; 
 
   }
 
