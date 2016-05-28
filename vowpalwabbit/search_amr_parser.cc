@@ -536,7 +536,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   //Losses for REDUCE_RIGHT action
 
   if(size>1 && !contains(gold_heads[last], stack[size-2])) //If no such edge exists then add loss
-    action_loss[REDUCE_RIGHT] +=1;  
+    action_loss[REDUCE_RIGHT] +=1;
 
   if(size>0 && gold_heads[last][0] >=idx && gold_heads[last].size() == 1) // we assume here that every node has only one head. Hallucinated nodes will take care of co-ref
     action_loss[REDUCE_RIGHT] +=1; //Any heads to last from buffer are lost
@@ -550,7 +550,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   }
 
   //Losses for SWAP_REDUCE_LEFT action
-  
+
   if(size>1 && !contains(gold_heads[stack[size-2]], idx)) //If no such edge exists then add loss
    action_loss[SWAP_REDUCE_LEFT] +=1;
 
@@ -563,7 +563,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     for(size_t i=idx+1; i<=n; i++)
       if( (contains(gold_heads[stack[size-2]], i) && gold_heads[stack[size-2]].size() == 1) || contains(gold_heads[i], stack[size-2]))
         action_loss[SWAP_REDUCE_LEFT] +=1;
-    if(contains(gold_heads[idx], stack[size-2]))
+    if(idx <=n && contains(gold_heads[idx], stack[size-2]))
       action_loss[SWAP_REDUCE_LEFT] +=1; //if idx was child of second_last, we have lost it
     if(contains(gold_heads[stack[size-1]], stack[size-2]))
       action_loss[SWAP_REDUCE_LEFT] +=1; //if last was child of second_last, we have lost it
@@ -692,11 +692,18 @@ float smatch_loss(Search::search& sch, uint64_t n)
         correct += 1;
   }
 
+  cdbg << "Gold " << gold << endl;
+  cdbg << "Pred  " << pred << endl;
+  cdbg << "Correct " << correct << endl;
+  cdbg << "Conceptend" << endl;
+
   // Then relations
   // For each
 
   for (size_t i =1;i<=n;i++)
   {
+    cdbg << "Gold heads size " << gold_heads[i].size() << endl;
+    cdbg << "Pred heads size " << heads[i].size() << endl;
     for (size_t j =0;j<gold_heads[i].size();j++)
       gold += 1;
     cdbg << "Printing heads " << i << endl;
@@ -705,8 +712,11 @@ float smatch_loss(Search::search& sch, uint64_t n)
       pred += 1;
       uint32_t p = contains_idx(gold_heads[i],heads[i][j]);
       cdbg << "The function " << p << endl;
-      if (p != heads[i].size()+ 10) {
-        if (tags[i][p] == gold_tags[i][p])
+      if (p != gold_heads[i].size()+ 10) {
+
+        cdbg << "Pred tag " << tags[i][j] << endl;
+        cdbg << "Gold tag " << gold_tags[i][p] << endl;
+        if (tags[i][j] == gold_tags[i][p])
           correct += 1;
       }
     }
@@ -1005,7 +1015,7 @@ void run(Search::search& sch, vector<example*>& ec)
   { for(size_t i=1; i<=n; i++)
     { cdbg << "size for i=" << i << " is " << heads[i].size() << endl;
       if(heads[i].size() == 0)
-       sch.output() << "0:0:" << NULL_CONCEPT << endl; 
+       sch.output() << "0:0:" << NULL_CONCEPT << endl;
       else
       { sch.output() << heads[i][0]<<":"<<tags[i][0]<<":"<<concepts[i];
         for (size_t j=1; j<heads[i].size();j++)
