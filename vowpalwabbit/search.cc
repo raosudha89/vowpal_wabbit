@@ -1526,6 +1526,9 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
     cdbg << "a=" << a << ", a_name=" << a_name << endl;
     a = a_name;
 
+    if ((priv.state == LEARN) && priv.record_learn_actions)
+      priv.learn_trajectory.push_back( a );
+    
     if (priv.metaoverride && priv.metaoverride->_post_prediction)
       priv.metaoverride->_post_prediction(*priv.metaoverride->sch, t-priv.meta_t, a, a_cost);
     return a;
@@ -1964,8 +1967,12 @@ void debug_oracle(vw&all, search&sch)
         { cout << "  *warning* the following one-step deviations (loss first) outperform ref!" << endl;
           any_better = true;
         }
-        cout << "    perturb @ t=" << t0 << ", action=" << priv.learn_a_idx-1 << ", loss=" << priv.learn_loss << " < " << ref_loss << endl;
-        cout << "        actions: ... " << priv.learn_trajectory << endl;
+        cout << "    perturb @ t=" << t0 << ", action=" << priv.learn_trajectory[0] << ", loss=" << priv.learn_loss << " < " << ref_loss << endl;
+        cout << "        actions: [";
+        for (size_t t=0; t<t0; t++) cout << ' ' << priv.train_trajectory[t].a;
+        cout << " ***";
+        for (action& a : priv.learn_trajectory) cout << ' ' << a;
+        cout << " ]" << endl;
       }
     }
   }
