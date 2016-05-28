@@ -124,6 +124,11 @@ def is_projective(G,original):
 	#print crossing_edges
 
 
+def update_sub(subtract,span):
+
+	for i in range(span[0]-1,len(subtract)):
+		subtract[i] += 1
+
 
 
 
@@ -133,14 +138,18 @@ def main(argv):
 	all_relations = {"ROOT":1,"NOEDGE":0}
 	concept_count = 2
 	relation_count = 1
-	#amr_aligned = open("amr-small")
+	amr_aligned = open("amr-small")
+	pos_file = open("amr-small.pos")
 	#amr_aligned = open("amr-release-1.0-training-full.aligned")
-	amr_aligned = open(argv[0])
-	pos_file = open(argv[1])
+	#pos_file = open("amr-release-1.0-training-full.pos")
+	#amr_aligned = open(argv[0])
+	#pos_file = open(argv[1])
 	line = amr_aligned.readline()
 	current_amr_graph = nx.MultiDiGraph()
 	prev_node = ""
 	prev_span = []
+	main_count = 0
+	folded = {}
 	while (line != ""):
 		if line.startswith("# ::id"):
 			current_id = line.split()[2]
@@ -148,16 +157,24 @@ def main(argv):
 		elif line.startswith("# ::tok"):
 			current_sent = line.strip("# ::tok").strip()
 			current_amr_graph.graph['sent'] = current_sent
+			#subtract = [0] * len(current_sent.split())
 		elif line.startswith("# ::node"):
 			x = line.strip().split('\t')
 			curr_node_id = x[1]
 			curr_node_label = x[2]
 			try:
+				# Get node info from current line
 				current_node_span = [int(p) for p in x[3].split('-')]
 				final_span = range(current_node_span[0], current_node_span[1])
+				# 
 				if final_span == prev_span:
 					if curr_node_label[0] != '"':
+						folded[curr_node_id] = prev_node
 						current_amr_graph.node[prev_node]['node_label'] += "_{}".format(curr_node_label)
+						# weird case
+						if curr_node_label in current_amr_graph.graph['sent'].split() and current_amr_graph.node[prev_node]['node_label'] in current_amr_graph.graph['sent'].split() :
+							update_sub(subtract, final_span)
+
 				else:
 					prev_span = final_span
 					prev_node = curr_node_id
@@ -184,6 +201,10 @@ def main(argv):
 			x = line.strip().split('\t')
 			head = x[4]
 			tail = x[5]
+			if head in folded:
+				head = folded[head]
+			if tail in folded:
+				tail = folded[tail]
 			if head not in current_amr_graph.node or tail not in current_amr_graph.node:
 				line = amr_aligned.readline()
 				continue
@@ -206,6 +227,9 @@ def main(argv):
 			pos = pos_file.readline().strip().split()
 			pos_t = [x.split('_')[1] for x in pos]
 			extra = 0
+
+
+			### Writing out in vw format
 			while (i <len(sent_tok)):
 				if j == len(span_sorted):
 					break
@@ -233,6 +257,7 @@ def main(argv):
 								relation_count += 1
 							e_lab = all_relations[label]
 							parent_pos = current_amr_graph.node[parent]['span'][0]
+							parent_pos -= subtract[parent_pos]
 							last_col += "{}:{}::".format(current_amr_graph.node[parent]['node_label'
 																						''],label)
 							sys.stdout.write("{} {} {} ".format(parent_pos+1,e_lab,c_lab))
@@ -263,10 +288,11 @@ def main(argv):
 					i += 1
 				count += 1
 			print
-			print "Done"
 			current_amr_graph = nx.MultiDiGraph()
+			main_count += 1
 			prev_node = ""
 			prev_span = []
+			folded = {}
 
 		line = amr_aligned.readline()
 
