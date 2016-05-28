@@ -517,7 +517,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
 
   //Losses for REDUCE_LEFT action
 
-  if(!contains(gold_heads[last], idx)) //If no such edge exists then add loss
+  if(size>0 && !contains(gold_heads[last], idx)) //If no such edge exists then add loss
     action_loss[REDUCE_LEFT] +=1;
 
   if(size>0)
@@ -535,8 +535,8 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
 
   //Losses for REDUCE_RIGHT action
 
-  if(!contains(gold_heads[last], stack[size-2])) //If no such edge exists then add loss
-    action_loss[REDUCE_RIGHT] +=1;
+  if(size>1 && !contains(gold_heads[last], stack[size-2])) //If no such edge exists then add loss
+    action_loss[REDUCE_RIGHT] +=1;  
 
   if(size>0 && gold_heads[last][0] >=idx && gold_heads[last].size() == 1) // we assume here that every node has only one head. Hallucinated nodes will take care of co-ref
     action_loss[REDUCE_RIGHT] +=1; //Any heads to last from buffer are lost
@@ -550,8 +550,8 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   }
 
   //Losses for SWAP_REDUCE_LEFT action
-
-  if(size>=2 && !contains(gold_heads[stack[size-2]], idx)) //If no such edge exists then add loss
+  
+  if(size>1 && !contains(gold_heads[stack[size-2]], idx)) //If no such edge exists then add loss
    action_loss[SWAP_REDUCE_LEFT] +=1;
 
   if(size >= 2)
