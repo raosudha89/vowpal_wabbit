@@ -118,6 +118,7 @@ struct search
                                              , const float*   allowed_actions_cost = nullptr
                                                  ,       size_t   learner_id           = 0
                                                      ,       float    weight               = 0.
+                         , uint32_t max_allowed = 0
                 );
 
   // make an LDF prediction on a list of examples. arguments are identical to predict(...)
@@ -314,6 +315,8 @@ public:
   predictor& set_allowed(v_array< pair<action,float> >& a);
   predictor& set_allowed(vector< pair<action,float> >& a);
 
+  predictor& set_max_allowed(action a);   // allows all actions [1,a], inclusive. ignored in LDF mode. also ignored if set_allowed/add_allowed is called explicitly
+
   // add a tag to condition on with a name, or set the conditioning
   // variables (i.e., erase previous ones)
   predictor& add_condition(ptag tag, char name);
@@ -344,6 +347,7 @@ private:
   v_array<float> allowed_actions_cost;   bool allowed_cost_is_pointer;  // if we're pointing to your memory TRUE; if it's our own memory FALSE
   size_t learner_id;
   int32_t skip_reduction_layer;
+  uint32_t max_allowed;
   search&sch;
 
   template<class T> void make_new_pointer(v_array<T>& A, size_t new_size);

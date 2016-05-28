@@ -638,6 +638,7 @@ void reset_search_structure(search_private& priv)
 
 void search_declare_loss(search_private& priv, float loss)
 { priv.loss_declared_cnt++;
+  cdbg << "search_declare_loss, loss_declared_cnt=" << priv.loss_declared_cnt << ", add loss " << loss << endl;
   switch (priv.state)
   { case INIT_TEST:  priv.test_loss  += loss; break;
     case INIT_TRAIN: priv.train_loss += loss; break;
@@ -767,7 +768,11 @@ inline float cs_get_cost_partial_prediction(bool isCB, polylabel& ld, size_t k)
 
 inline void cs_set_cost_loss(bool isCB, polylabel& ld, size_t k, float val)
 { if (isCB) ld.cb.costs[k].cost = val;
-  else      ld.cs.costs[k].x    = val;
+  else
+  { assert(k >= 0);
+    assert(k < ld.cs.costs.size());
+    ld.cs.costs[k].x    = val;
+  }
 }
 
 inline void cs_costs_erase(bool isCB, polylabel& ld)
@@ -785,7 +790,7 @@ inline void cs_cost_push_back(bool isCB, polylabel& ld, uint32_t index, float va
   else      { CS::wclass   cost = { value, index, 0., 0. }; ld.cs.costs.push_back(cost); }
 }
 
-polylabel& allowed_actions_to_ld(search_private& priv, size_t ec_cnt, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost)
+polylabel& allowed_actions_to_ld(search_private& priv, size_t ec_cnt, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, uint32_t max_action_allowed)
 { bool isCB = priv.cb_learner;
   polylabel& ld = *priv.allowed_actions_cache;
   uint32_t num_costs = (uint32_t)cs_get_costs_size(isCB, ld);
@@ -817,11 +822,12 @@ polylabel& allowed_actions_to_ld(search_private& priv, size_t ec_cnt, const acti
   }
   else     // non-LDF version, no action costs
   { if ((allowed_actions == nullptr) || (allowed_actions_cnt == 0))   // any action is allowed
-    { if (num_costs != priv.A)    // if there are already A-many actions, they must be the right ones, unless the user did something stupid like putting duplicate allowed_actions...
-      { cs_costs_erase(isCB, ld);
-        for (action k = 0; k < priv.A; k++)
-          cs_cost_push_back(isCB, ld, k+1, FLT_MAX);  //+1 because MC is 1-based
-      }
+    { //if (num_costs != priv.A)    // if there are already A-many actions, they must be the right ones, unless the user did something stupid like putting duplicate allowed_actions...
+      uint32_t A = (max_action_allowed == 0) ? priv.A : max_action_allowed;
+      cdbg << "A=" << A << ", max_action_allowed=" << max_action_allowed << ", priv.A=" << priv.A << endl;
+      cs_costs_erase(isCB, ld);
+      for (action k = 0; k < A; k++)
+        cs_cost_push_back(isCB, ld, k+1, FLT_MAX);  //+1 because MC is 1-based
     }
     else     // we need to peek at allowed_actions
     { cs_costs_erase(isCB, ld);
@@ -833,7 +839,7 @@ polylabel& allowed_actions_to_ld(search_private& priv, size_t ec_cnt, const acti
   return ld;
 }
 
-void allowed_actions_to_label(search_private& priv, size_t ec_cnt, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, const action* oracle_actions, size_t oracle_actions_cnt, polylabel& lab)
+void allowed_actions_to_label(search_private& priv, size_t ec_cnt, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, const action* oracle_actions, size_t oracle_actions_cnt, polylabel& lab, uint32_t max_action_allowed)
 { bool isCB = priv.cb_learner;
   cdbg << "allowed_actions_to_label priv.is_ldf=" << priv.is_ldf << endl;
   if (priv.is_ldf)   // LDF version easier
@@ -862,22 +868,18 @@ void allowed_actions_to_label(search_private& priv, size_t ec_cnt, const action*
   else     // non-LDF, no action costs
   { if ((allowed_actions == nullptr) || (allowed_actions_cnt == 0))   // any action is allowed
     { if (priv.global_is_mixed_ldf) cs_costs_erase(isCB, lab);
-      bool set_to_one = false;
-      if (cs_get_costs_size(isCB, lab) != priv.A)
-      { cs_costs_erase(isCB, lab);
-        for (action k=0; k<priv.A; k++)
-          cs_cost_push_back(isCB, lab, k+1, 1.);
-        set_to_one = true;
-      }
+      cs_costs_erase(isCB, lab);
+      uint32_t A = (max_action_allowed == 0) ? priv.A : max_action_allowed;
+      for (action k=0; k<A; k++)
+        cs_cost_push_back(isCB, lab, k+1, 1.);
       //cerr << "lab = ["; for (size_t i=0; i<lab.cs.costs.size(); i++) cdbg << ' ' << lab.cs.costs[i].class_index << ':' << lab.cs.costs[i].x; cdbg << " ]" << endl;
-      if (oracle_actions_cnt <= 1)   // common case to speed up
-      { if (! set_to_one)
-          for (action k=0; k<priv.A; k++)
-            cs_set_cost_loss(isCB, lab, k, 1.);
-        if (oracle_actions_cnt == 1)
+      if (oracle_actions_cnt == 1)   // common case to speed up
+      { if (oracle_actions_cnt == 1)
+        { assert(oracle_actions[0] <= A);
           cs_set_cost_loss(isCB, lab, oracle_actions[0]-1, 0.);
+        }
       }
-      else
+      else if (oracle_actions_cnt > 1)
       { for (action k=0; k<priv.A; k++)
           cs_set_cost_loss(isCB, lab, k, array_contains<action>(k+1, oracle_actions, oracle_actions_cnt) ? 0.f : 1.f);
       }
@@ -919,10 +921,11 @@ template<class T> void push_at(v_array<T>& v, T item, size_t pos)
   }
 }
 
-action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* oracle_actions, size_t oracle_actions_cnt, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost)
+action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* oracle_actions, size_t oracle_actions_cnt, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, uint32_t max_action_allowed)
 { action a = (action)-1;
+  uint32_t A = (max_action_allowed == 0) ? priv.A : max_action_allowed;
   if (priv.use_action_costs)
-  { size_t K = (allowed_actions == nullptr) ? priv.A : allowed_actions_cnt;
+  { size_t K = (allowed_actions == nullptr) ? A : allowed_actions_cnt;
     cdbg << "costs = ["; for (size_t k=0; k<K; k++) cdbg << ' ' << allowed_actions_cost[k]; cdbg << " ]" << endl;
     float min_cost = FLT_MAX;
     for (size_t k=0; k<K; k++)
@@ -949,14 +952,14 @@ action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* o
     a = ( oracle_actions_cnt > 0) ?  oracle_actions[random(oracle_actions_cnt )] :
         (allowed_actions_cnt > 0) ? allowed_actions[random(allowed_actions_cnt)] :
         priv.is_ldf ? (action)random(ec_cnt) :
-        (action)(1 + random(priv.A));
+        (action)(1 + random(A));
   }
   cdbg << "choose_oracle_action from oracle_actions = ["; for (size_t i=0; i<oracle_actions_cnt; i++) cdbg << " " << oracle_actions[i]; cdbg << " ], ret=" << a << endl;
   if (need_memo_foreach_action(priv) && (priv.state == INIT_TRAIN))
   { v_array<action_cache>* this_cache = new v_array<action_cache>();
     *this_cache = v_init<action_cache>();
     // TODO we don't really need to construct this polylabel
-    polylabel l = allowed_actions_to_ld(priv, 1, allowed_actions, allowed_actions_cnt, allowed_actions_cost);
+    polylabel l = allowed_actions_to_ld(priv, 1, allowed_actions, allowed_actions_cnt, allowed_actions_cost, max_action_allowed);
     size_t K = cs_get_costs_size(priv.cb_learner, l);
     for (size_t k = 0; k < K; k++)
     { action cl = cs_get_cost_index(priv.cb_learner, l, k);
@@ -970,21 +973,22 @@ action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* o
   return a;
 }
 
-action single_prediction_notLDF(search_private& priv, example& ec, int policy, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, float& a_cost, action override_action)    // if override_action != -1, then we return it as the action and a_cost is set to the appropriate cost for that action
+action single_prediction_notLDF(search_private& priv, example& ec, int policy, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, float& a_cost, action override_action, uint32_t max_action_allowed)    // if override_action != -1, then we return it as the action and a_cost is set to the appropriate cost for that action
 { vw& all = *priv.all;
   polylabel old_label = ec.l;
   bool need_partial_predictions = need_memo_foreach_action(priv) || (priv.metaoverride && priv.metaoverride->_foreach_action) || (override_action != (action)-1);
-  if ((allowed_actions_cnt > 0) || need_partial_predictions)
-    ec.l = allowed_actions_to_ld(priv, 1, allowed_actions, allowed_actions_cnt, allowed_actions_cost);
+  if ((allowed_actions_cnt > 0) || need_partial_predictions || (max_action_allowed > 0))
+    ec.l = allowed_actions_to_ld(priv, 1, allowed_actions, allowed_actions_cnt, allowed_actions_cost, max_action_allowed);
   else
     ec.l.cs = priv.empty_cs_label;
 
   if (priv.global_is_mixed_ldf) ec.skip_reduction_layer = 1;
   
   cdbg << "allowed_actions_cnt=" << allowed_actions_cnt << ", ec.l = ["; for (size_t i=0; i<ec.l.cs.costs.size(); i++) cdbg << ' ' << ec.l.cs.costs[i].class_index << ':' << ec.l.cs.costs[i].x; cdbg << " ]" << endl;
-
+  cdbg << "ec.skip_reduction_layer = " << ec.skip_reduction_layer << endl;
   priv.base_learner->predict(ec, policy);
   uint32_t act = ec.pred.multiclass;
+  assert(act > 0);
   cdbg << "a=" << act << " from"; if (allowed_actions) { for (size_t ii=0; ii<allowed_actions_cnt; ii++) cdbg << ' ' << allowed_actions[ii]; } cdbg << endl;
   a_cost = ec.partial_prediction;
   cdbg << "a_cost = " << a_cost << endl;
@@ -1393,7 +1397,7 @@ void foreach_action_from_cache(search_private& priv, size_t t, action override_a
 }
 
 // note: ec_cnt should be 1 if we are not LDF
-action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, size_t learner_id, float& a_cost, float weight)
+action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, size_t learner_id, float& a_cost, float weight, uint32_t max_action_allowed)
 { size_t condition_on_cnt = condition_on_names ? strlen(condition_on_names) : 0;
   size_t t = priv.t + priv.meta_t;
   priv.t++;
@@ -1407,7 +1411,7 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
 
   // if we're just after the string, choose an oracle action
   if ((priv.state == GET_TRUTH_STRING) || priv.force_oracle)
-  { action a = choose_oracle_action(priv, ec_cnt, oracle_actions, oracle_actions_cnt, allowed_actions, allowed_actions_cnt, allowed_actions_cost);
+  { action a = choose_oracle_action(priv, ec_cnt, oracle_actions, oracle_actions_cnt, allowed_actions, allowed_actions_cnt, allowed_actions_cost, max_action_allowed);
     //if (priv.metaoverride && priv.metaoverride->_post_prediction)
     //  priv.metaoverride->_post_prediction(*priv.metaoverride->sch, t-priv.meta_t, a, 0.);
     a_cost = 0.;
@@ -1429,8 +1433,13 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
 
   setup_learner_id(priv, learner_id);
   // for LDF, # of valid actions is ec_cnt; otherwise it's either allowed_actions_cnt or A
-  size_t valid_action_cnt = priv.is_ldf ? ec_cnt :
-                            (allowed_actions_cnt > 0) ? allowed_actions_cnt : priv.A;
+  size_t valid_action_cnt = priv.is_ldf
+                            ? ec_cnt
+                            : (allowed_actions_cnt > 0)
+                              ? allowed_actions_cnt
+                              : (max_action_allowed > 0)
+                                ? max_action_allowed
+                                : priv.A;
 
   // if we're in LEARN mode and _at_ learn_t, then:
   //   - choose the next action
@@ -1455,7 +1464,7 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
       if (priv.examples_dont_change)
         priv.learn_ec_ref = ecs;
       else
-      { size_t label_size = priv.is_ldf ? sizeof(CS::label) : sizeof(MC::label_t);
+      { size_t label_size = priv.is_ldf ? sizeof(CS::label) : sizeof(MC::label_t);  // TODO we can do this better
         void (*label_copy_fn)(void*,void*) = priv.is_ldf ? CS::cs_label.copy_label : nullptr;
 
         ensure_size(priv.learn_ec_copy, ec_cnt);
@@ -1551,7 +1560,7 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
     }
 
     if ((!skip) && (policy == -1))
-      a = choose_oracle_action(priv, ec_cnt, oracle_actions, oracle_actions_cnt, allowed_actions, allowed_actions_cnt, allowed_actions_cost);   // TODO: we probably want to actually get costs for oracle actions???
+      a = choose_oracle_action(priv, ec_cnt, oracle_actions, oracle_actions_cnt, allowed_actions, allowed_actions_cnt, allowed_actions_cost, max_action_allowed);   // TODO: we probably want to actually get costs for oracle actions???
 
     bool need_fea = (policy == -1) && priv.metaoverride && priv.metaoverride->_foreach_action;
 
@@ -1584,7 +1593,7 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
           }
           cdbg << "calling single_prediction_LDF or single_prediction_notLDF based on is_ldf=" << priv.is_ldf << endl;
           a = priv.is_ldf ? single_prediction_LDF(priv, ecs, ec_cnt, learner, a_cost, need_fea ? a : (action)-1)
-                : single_prediction_notLDF(priv, *ecs, learner, allowed_actions, allowed_actions_cnt, allowed_actions_cost, a_cost, need_fea ? a : (action)-1);
+                          : single_prediction_notLDF(priv, *ecs, learner, allowed_actions, allowed_actions_cnt, allowed_actions_cost, a_cost, need_fea ? a : (action)-1, max_action_allowed);
 
           cdbg << "passthrough = ["; for (size_t kk=0; kk<priv.last_action_repr.size(); kk++) cdbg << ' ' << priv.last_action_repr.indicies[kk] << ':' << priv.last_action_repr.values[kk]; cdbg << " ]" << endl;
 
@@ -1604,7 +1613,7 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
           priv.learn_learner_id = learner_id;
           
           setup_learner_id(priv, priv.learn_learner_id);
-          allowed_actions_to_label(priv, ec_cnt, allowed_actions, allowed_actions_cnt, allowed_actions_cost, oracle_actions, oracle_actions_cnt, priv.gte_label);
+          allowed_actions_to_label(priv, ec_cnt, allowed_actions, allowed_actions_cnt, allowed_actions_cost, oracle_actions, oracle_actions_cnt, priv.gte_label, max_action_allowed);
           cdbg << "priv.gte_label = ["; for (size_t i=0; i<priv.gte_label.cs.costs.size(); i++) cdbg << ' ' << priv.gte_label.cs.costs[i].class_index << ':' << priv.gte_label.cs.costs[i].x; cdbg << " ]" << endl;
           
           priv.learn_ec_ref = ecs;
@@ -2401,6 +2410,10 @@ void parse_task_names(search& sch, search_private& priv, string& task_string)
   }
   all_task_names.delete_v();
 }
+
+template<class T>
+void modify_variable_map(std::map<std::string, po::variable_value>& vm, const std::string& opt, const T& val)
+{ vm[opt].value() = boost::any(val); }
   
 base_learner* setup(vw&all)
 { if (missing_option<size_t, false>(all, "search", "Use learning to search, argument=maximum action id or 0 for LDF"))
@@ -2432,6 +2445,7 @@ base_learner* setup(vw&all)
   ("search_perturb_oracle",    po::value<float>(),  "perturb the oracle on rollin with this probability (def: 0)")
   ("search_linear_ordering",                        "insist on generating examples in linear order (def: hoopla permutation)")
   ("search_only_task",         po::value<size_t>(), "only learn this specific task (def: 0 = learn all tasks)")
+  ("search_override_hook",                          "in library mode, you might want to override the (eg loaded) task with a hook; this allows that to happen")
   ;
   add_options(all);
   po::variables_map& vm = all.vm;
@@ -2441,9 +2455,12 @@ base_learner* setup(vw&all)
     if (all.args[i] == "--search_task" && all.args[i+1] == "hook")
       has_hook_task = true;
   if (has_hook_task)
-    for (int i = (int)all.args.size()-2; i >= 0; i--)
+  { for (int i = (int)all.args.size()-2; i >= 0; i--)
       if (all.args[i] == "--search_task" && all.args[i+1] != "hook")
         all.args.erase(all.args.begin() + i, all.args.begin() + i + 2);
+    vm.erase(vm.find("search_task"));
+    //modify_variable_map<string>(vm, "search_task", "hook");
+  }
 
   search& sch = calloc_or_throw<search>();
   sch.priv = &calloc_or_throw<search_private>();
@@ -2657,6 +2674,11 @@ base_learner* setup(vw&all)
     all.args.push_back("m");
   }
 
+  if (vm.count("search_override_hook") > 0)
+  { cerr << "overriding task " << task_string << " with hook!" << endl;
+    // TODO remove
+  }
+  
   if (((!priv.is_ldf) || priv.global_is_mixed_ldf) && (! args_has_non_ldf))
   { stringstream ss;
     ss << priv.A; // vm["search"].as<size_t>();
@@ -2722,11 +2744,11 @@ float action_cost_loss(action a, const action* act, const float* costs, size_t s
 // the interface:
 bool search::is_ldf() { return priv->is_ldf; }
 
-action search::predict(example& ec, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, size_t learner_id, float weight)
+action search::predict(example& ec, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, size_t learner_id, float weight, uint32_t max_action_allowed)
 { float a_cost = 0.;
   if (priv->multitask != nullptr)
     learner_id = priv->multitask->size() * learner_id + priv->current_task; // TODO don't have size in the inner loop
-  action a = search_predict(*priv, &ec, 1, mytag, oracle_actions, oracle_actions_cnt, condition_on, condition_on_names, allowed_actions, allowed_actions_cnt, allowed_actions_cost, learner_id, a_cost, weight);
+  action a = search_predict(*priv, &ec, 1, mytag, oracle_actions, oracle_actions_cnt, condition_on, condition_on_names, allowed_actions, allowed_actions_cnt, allowed_actions_cost, learner_id, a_cost, weight, max_action_allowed);
   if (priv->state == INIT_TEST) priv->test_action_sequence.push_back(a);
   if (mytag != 0)
   { if (mytag < priv->ptag_to_action.size())
@@ -2757,7 +2779,7 @@ action search::predictLDF(example* ecs, size_t ec_cnt, ptag mytag, const action*
   //  learner_id = priv->multitask->size() * learner_id + priv->current_task; // TODO don't have size in the inner loop
   learner_id += priv->learner_id_offset;
   // TODO: action costs for ldf
-  action a = search_predict(*priv, ecs, ec_cnt, mytag, oracle_actions, oracle_actions_cnt, condition_on, condition_on_names, nullptr, 0, nullptr, learner_id, a_cost, weight);
+  action a = search_predict(*priv, ecs, ec_cnt, mytag, oracle_actions, oracle_actions_cnt, condition_on, condition_on_names, nullptr, 0, nullptr, learner_id, a_cost, weight, 0);
   if (priv->state == INIT_TEST) priv->test_action_sequence.push_back(a);
   if ((mytag != 0) && ecs[a].l.cs.costs.size() > 0)
   { if (mytag < priv->ptag_to_action.size())
@@ -2797,6 +2819,7 @@ void search::execute_set_options(uint32_t opts)
   set_option_bit(opts, IS_MIXED_LDF           , this->priv->is_mixed_ldf);
   set_option_bit(opts, NO_CACHING             , this->priv->no_caching);
   set_option_bit(opts, ACTION_COSTS           , this->priv->use_action_costs);
+  if (this->priv->is_mixed_ldf) this->priv->global_is_mixed_ldf = true;
 }
   
 void  search::set_options(uint32_t opts)
@@ -2926,7 +2949,7 @@ void search::ldf_set_label(size_t i, action a, float cost)
   }
   else
   { lab.costs[0].x = 0.;
-    lab.costs[0].class_index = (uint64_t)a+1;
+    lab.costs[0].class_index = (uint64_t)a; // NOTE: TODO why was this +1 before????
     lab.costs[0].partial_prediction = 0.;
     lab.costs[0].wap_value = 0.;
   }
@@ -2954,6 +2977,7 @@ predictor::predictor(search& sch, ptag my_tag) : is_ldf(false), my_tag(my_tag), 
   condition_on_names = v_init<char>();
   allowed_actions = v_init<action>();
   allowed_actions_cost = v_init<float>();
+  max_allowed = 0;
 }
 
 void predictor::free_ec()
@@ -3102,21 +3126,23 @@ predictor& predictor::erase_alloweds()
   if (allowed_cost_is_pointer) allowed_actions_cost.end() = allowed_actions_cost.begin(); else allowed_actions_cost.erase();
   return *this;
 }
-predictor& predictor::add_allowed(action a) { return add_to(allowed_actions, allowed_is_pointer, a, false); }
-predictor& predictor::add_allowed(action*a, size_t action_count) { return add_to(allowed_actions, allowed_is_pointer, a, action_count, false); }
-predictor& predictor::add_allowed(v_array<action>& a) { return add_to(allowed_actions, allowed_is_pointer, a.begin(), a.size(), false); }
+predictor& predictor::add_allowed(action a) { max_allowed = 0; return add_to(allowed_actions, allowed_is_pointer, a, false); }
+predictor& predictor::add_allowed(action*a, size_t action_count) { max_allowed = 0; return add_to(allowed_actions, allowed_is_pointer, a, action_count, false); }
+predictor& predictor::add_allowed(v_array<action>& a) { max_allowed = 0; return add_to(allowed_actions, allowed_is_pointer, a.begin(), a.size(), false); }
 
-predictor& predictor::set_allowed(action a) { return add_to(allowed_actions, allowed_is_pointer, a, true); }
-predictor& predictor::set_allowed(action*a, size_t action_count) { return add_to(allowed_actions, allowed_is_pointer, a, action_count, true); }
-predictor& predictor::set_allowed(v_array<action>& a) { return add_to(allowed_actions, allowed_is_pointer, a.begin(), a.size(), true); }
+predictor& predictor::set_allowed(action a) { max_allowed = 0; return add_to(allowed_actions, allowed_is_pointer, a, true); }
+predictor& predictor::set_allowed(action*a, size_t action_count) { max_allowed = 0; return add_to(allowed_actions, allowed_is_pointer, a, action_count, true); }
+predictor& predictor::set_allowed(v_array<action>& a) { max_allowed = 0; return add_to(allowed_actions, allowed_is_pointer, a.begin(), a.size(), true); }
 
 predictor& predictor::add_allowed(action a, float cost)
 { add_to(allowed_actions_cost, allowed_cost_is_pointer, cost, false);
+  max_allowed = 0; 
   return add_to(allowed_actions, allowed_is_pointer, a, false);
 }
 
 predictor& predictor::add_allowed(action*a, float*costs, size_t action_count)
 { add_to(allowed_actions_cost, allowed_cost_is_pointer, costs, action_count, false);
+  max_allowed = 0; 
   return add_to(allowed_actions, allowed_is_pointer, a, action_count, false);
 }
 predictor& predictor::add_allowed(v_array< pair<action,float> >& a)
@@ -3124,6 +3150,7 @@ predictor& predictor::add_allowed(v_array< pair<action,float> >& a)
   { add_to(allowed_actions,      allowed_is_pointer,      a[i].first,  false);
     add_to(allowed_actions_cost, allowed_cost_is_pointer, a[i].second, false);
   }
+  max_allowed = 0; 
   return *this;
 }
 predictor& predictor::add_allowed(vector< pair<action,float> >& a)
@@ -3131,21 +3158,25 @@ predictor& predictor::add_allowed(vector< pair<action,float> >& a)
   { add_to(allowed_actions,      allowed_is_pointer,      a[i].first,  false);
     add_to(allowed_actions_cost, allowed_cost_is_pointer, a[i].second, false);
   }
+  max_allowed = 0; 
   return *this;
 }
 
 predictor& predictor::set_allowed(action a, float cost)
 { add_to(allowed_actions_cost, allowed_cost_is_pointer, cost, true);
+  max_allowed = 0; 
   return add_to(allowed_actions, allowed_is_pointer, a, true);
 }
 
 predictor& predictor::set_allowed(action*a, float*costs, size_t action_count)
 { add_to(allowed_actions_cost, allowed_cost_is_pointer, costs, action_count, true);
+  max_allowed = 0; 
   return add_to(allowed_actions, allowed_is_pointer, a, action_count, true);
 }
-predictor& predictor::set_allowed(v_array< pair<action,float> >& a) { erase_alloweds(); return add_allowed(a); }
-predictor& predictor::set_allowed(vector< pair<action,float> >& a) { erase_alloweds(); return add_allowed(a); }
+predictor& predictor::set_allowed(v_array< pair<action,float> >& a) { erase_alloweds(); max_allowed = 0; return add_allowed(a); }
+predictor& predictor::set_allowed(vector< pair<action,float> >& a) { erase_alloweds(); max_allowed = 0; return add_allowed(a); }
 
+predictor& predictor::set_max_allowed(action a) { erase_alloweds(); max_allowed = a; return *this; }
 
 predictor& predictor::add_condition(ptag tag, char name) { condition_on_tags.push_back(tag); condition_on_names.push_back(name); return *this; }
 predictor& predictor::set_condition(ptag tag, char name) { condition_on_tags.erase(); condition_on_names.erase(); return add_condition(tag, name); }
@@ -3189,9 +3220,11 @@ action predictor::predict()
   if (this->sch.priv->global_is_mixed_ldf)
     for (size_t i = 0; i < ec_cnt; i++)
       ec[i].skip_reduction_layer = skip_reduction_layer;
+  if (max_allowed > 0) assert(alA == nullptr);
+  if (max_allowed > 0) assert(! is_ldf);
   action p = is_ldf
              ? sch.predictLDF(ec, ec_cnt, my_tag, orA, oracle_actions.size(), cOn, cNa, learner_id, weight)
-             : sch.predict(*ec, my_tag, orA, oracle_actions.size(), cOn, cNa, alA, numAlA, alAcosts, learner_id, weight);
+             : sch.predict(*ec, my_tag, orA, oracle_actions.size(), cOn, cNa, alA, numAlA, alAcosts, learner_id, weight, max_allowed);
   if (this->sch.priv->global_is_mixed_ldf)
     for (size_t i = 0; i < ec_cnt; i++)
       ec[i].skip_reduction_layer = 0;

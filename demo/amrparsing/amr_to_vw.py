@@ -5,8 +5,6 @@ import pyparsing
 import cPickle as pickle
 import matplotlib.pyplot as plt
 
-nodes = []
-relations = []
 amr_nx_graph = None
 
 
@@ -131,12 +129,22 @@ def is_projective(G,original):
 
 def main(argv):
 
-	all_concept = {}
-	all_relations = {}
+	all_concept = {"NULL":1}
+	all_relations = {"ROOT":1,"NOEDGE":0}
+	concept_count = 2
+	relation_count = 1
+	#amr_aligned = open("amr-small")
+	#pos_file = open("amr-small.pos")
 	#amr_aligned = open("amr-release-1.0-training-full.aligned")
+	#pos_file = open("amr-release-1.0-training-full.pos")
 	amr_aligned = open(argv[0])
+	pos_file = open(argv[1])
 	line = amr_aligned.readline()
 	current_amr_graph = nx.MultiDiGraph()
+	prev_node = ""
+	prev_span = []
+	main_count = 0
+	folded = {}
 	while (line != ""):
 		if line.startswith("# ::id"):
 			current_id = line.split()[2]
@@ -151,14 +159,29 @@ def main(argv):
 			try:
 				current_node_span = [int(p) for p in x[3].split('-')]
 				final_span = range(current_node_span[0], current_node_span[1])
+				if final_span == prev_span:
+					if curr_node_label[0] != '"':
+						folded[curr_node_id] = prev_node
+						current_amr_graph.node[prev_node]['node_label'] += "_{}".format(curr_node_label)
+				else:
+					prev_span = final_span
+					prev_node = curr_node_id
+					current_amr_graph.add_node(curr_node_id, node_label=curr_node_label, span=final_span)
+					#current_amr_graph.add_node(curr_node_id, node_label=curr_node_label, span=final_span)
 				if not final_span:
 					final_span = [-1]
+					prev_span = [-1]
+					prev_node = curr_node_id
+					current_amr_graph.add_node(curr_node_id, node_label=curr_node_label, span=final_span)
 			except IndexError:
 				final_span = [-1]
+				prev_span = [-1]
+				prev_node = curr_node_id
+				current_amr_graph.add_node(curr_node_id, node_label=curr_node_label, span=final_span)
 			#Add node to graph
 			# if curr_node_id not in nodes:
 			# 	nodes[curr_node]
-			current_amr_graph.add_node(curr_node_id,node_label=curr_node_label,span=final_span)
+
 		elif line.startswith("# ::root"):
 			x = line.strip().split('\t')
 			current_amr_graph.graph['root'] = x[1]
@@ -166,23 +189,18 @@ def main(argv):
 			x = line.strip().split('\t')
 			head = x[4]
 			tail = x[5]
+			if head in folded:
+				head = folded[head]
+			if tail in folded:
+				tail = folded[tail]
+			if head not in current_amr_graph.node or tail not in current_amr_graph.node:
+				line = amr_aligned.readline()
+				continue
 			label  = x[2]
 			current_amr_graph.add_edge(head,tail,key=label,edge_label=label)
 		elif line.strip() == "":
-			# print "Nodes"
-			# print current_amr_graph.nodes()
-			# print current_amr_graph.edges()
 			span_sorted = sorted([(current_amr_graph.node[x]['span'][0],current_amr_graph.node[x]['span'][-1],
-			x,current_amr_graph.node[x]['span']) for x in current_amr_graph.nodes() if current_amr_graph.node[x]['span'][0] != -1 ])
-			#span_sorted = [x[1] for x in span_sorted]
-			#pre_o = pre_order(current_amr_graph)
-			#pre_o =  [current_amr_graph.node[x]['node_label'] for x in pre_o]
-			#assert len(span_sorted) == len(pre_o)
-			# print span_sorted, pre_o
-			# print
-			#is_projective(current_amr_graph,span_sorted)
-			#num_1_swaps,num_more_swap = count_swaps(span_sorted,pre_o)
-			#print num_1_swaps, num_more_swap
+			x,current_amr_graph.node[x]['span']) for x in current_amr_graph.node.keys() if current_amr_graph.node[x]['span'][0] != -1 ])
 			for each_edge in current_amr_graph.edges():
 				lhs = each_edge[0]
 				rhs = each_edge[1]
@@ -194,7 +212,8 @@ def main(argv):
 			i = 0
 			j = 0
 			count = 1
-			POS = "UNK"
+			pos = pos_file.readline().strip().split()
+			pos_t = [x.split('_')[1] for x in pos]
 			extra = 0
 			while (i <len(sent_tok)):
 				if j == len(span_sorted):
@@ -202,23 +221,41 @@ def main(argv):
 				if span_sorted[j][0] == i:
 					node = span_sorted[j][2]
 					node_label = current_amr_graph.node[node]['node_label']
+					if node_label not in all_concept:
+						all_concept[node_label] = concept_count
+						concept_count += 1
+					c_lab = all_concept[node_label]
 					parent_info = current_amr_graph.pred[node]
 					#If it is a root
 					if len(parent_info) == 0:
-						print count,"\t",' '.join(sent_tok[i:span_sorted[j][1]+1]),"\t",POS,"\t",0,"\t","ROOT","\t",node_label
+						e_lab = all_relations["ROOT"]
+						sys.stdout.write("{} {} {} {}:{}".format(0,e_lab,c_lab,0,"ROOT"))
+						#print count,"\t",' '.join(sent_tok[i:span_sorted[j][1]+1]),"\t",POS,"\t",0,"\t","ROOT","\t",node_label
 					else:
-						#We choose a random parent for now
-						parent = parent_info.keys()[0]
-						label = parent_info[parent].keys()[0]
-						parent_pos = current_amr_graph.node[parent]['span'][0]
+						# Write parent info
+						last_col = ""
+						for parent in parent_info.keys():
+							#parent = parent_info.keys()[0]
+							label = parent_info[parent].keys()[0]
+							if label not in all_relations:
+								all_relations[label] = relation_count
+								relation_count += 1
+							e_lab = all_relations[label]
+							parent_pos = current_amr_graph.node[parent]['span'][0]
+							last_col += "{}:{}::".format(current_amr_graph.node[parent]['node_label'
+																						''],label)
+							sys.stdout.write("{} {} {} ".format(parent_pos+1,e_lab,c_lab))
+						sys.stdout.write(last_col)
+						# Word
+					sys.stdout.write("|w {} ".format(' '.join(sent_tok[i:span_sorted[j][1]+1])))
+					sys.stdout.write("|p {}\n".format('_'.join(pos_t[i:span_sorted[j][1]+1])))
+
 						#print p
-						print count,"\t",' '.join(sent_tok[i:span_sorted[j][1]+1]),"\t",POS,"\t",parent_pos+1+extra,"\t",label,"\t",node_label
-					#print current_amr_graph.pred[span_sorted[j][2]]
+					#print count,"\t",' '.join(sent_tok[i:span_sorted[j][1]+1]),"\t",POS,"\t",parent_pos+1+extra,"\t",label,"\t",node_label
+
 
 					new_i = span_sorted[j][1] + 1
 					j += 1
-					#print span_sorted[j]
-					#print j
 					if j == len(span_sorted):
 						break
 					if span_sorted[j][0] != i:
@@ -226,25 +263,33 @@ def main(argv):
 					else:
 						extra += 1
 				else:
-					print count,"\t",sent_tok[i],"\t",0,"\t","NOEDGE","\t","NULL"
+					e_lab = all_relations["NOEDGE"]
+					c_lab = all_concept["NULL"]
+					sys.stdout.write("{} {} {} {}:{}".format(0,e_lab,c_lab,0,"NOEDGE"))
+					sys.stdout.write("|w {} ".format(sent_tok[i]))
+					sys.stdout.write("|p {}\n".format(pos_t[i]))
+					#print count,"\t",sent_tok[i],"\t",POS,"\t",0,"\t","NOEDGE","\t","NULL"
 					i += 1
 				count += 1
-
-
-			# for each in span_sorted:
-			# 	curr_node = each[1]
-			# 	span_start = current_amr_graph.node[curr_node]['span'][0]
-			# 	span_end = current_amr_graph.node[curr_node]['span'][-1]+1
-			# 	#sent = current_amr_graph.graph['sent'].split()[span_start:span_end]
-			# 	print span_start, span_end
-			# 	if span_start == -1:
-			# 		continue
 			print
 			current_amr_graph = nx.MultiDiGraph()
+			main_count += 1
+			prev_node = ""
+			prev_span = []
+			folded = {}
 
 		line = amr_aligned.readline()
 
 	amr_aligned.close()
+	with open("nodes_dict", 'w') as f:
+		nodes_list = sorted([ (key,all_concept[key])for key in all_concept],key=lambda x:x[1])
+		for each_node in nodes_list:
+			f.write("{0}\t{1}\n".format(each_node[0],each_node[1]))
+
+	with open("edges_dict", 'w') as f:
+		edges_list = sorted([ (key,all_relations[key])for key in all_relations],key=lambda x:x[1])
+		for each_node in edges_list:
+			f.write("{0}\t{1}\n".format(each_node[0],each_node[1]))
 
 
 if __name__ == "__main__":

@@ -62,24 +62,35 @@ void del_example_namespaces_from_example(example& target, example& source)
     }
 }
 
-void add_example_namespace_from_memory(label_feature_map& lfm, example& ec, size_t lab)
+void add_example_namespace_from_memory(label_feature_map& lfm, example& ec, size_t lab, char target_namespace)
 { size_t lab_hash = hash_lab(lab);
   features& res = lfm.get(lab, lab_hash);
   if (res.size() == 0) return;
-  add_example_namespace(ec, 'l', res);
+  add_example_namespace(ec, target_namespace, res);
 }
 
-void del_example_namespace_from_memory(label_feature_map& lfm, example& ec, size_t lab)
+void del_example_namespace_from_memory(label_feature_map& lfm, example& ec, size_t lab, char target_namespace)
 { size_t lab_hash = hash_lab(lab);
   features& res = lfm.get(lab, lab_hash);
   if (res.size() == 0) return;
-  del_example_namespace(ec, 'l', res);
+  del_example_namespace(ec, target_namespace, res);
 }
 
 void set_label_features(label_feature_map& lfm, size_t lab, features& fs)
 { size_t lab_hash = hash_lab(lab);
-  if (lfm.contains(lab, lab_hash)) return;
+  if (lfm.contains(lab, lab_hash))
+  { cerr << "warning: set_label_features called but label already exists (" << lab << ")" << endl;
+    return;
+  }
   lfm.put_after_get(lab, lab_hash, fs);
+}
+
+void set_label_features(label_feature_map& lfm, size_t lab, example& ec)
+{ features fs0; // = new features();
+  for (features& fs : ec)
+    for (auto& f : fs)
+      fs0.push_back(f.value(), f.index());
+  set_label_features(lfm, lab, fs0);
 }
 
 void free_label_features(label_feature_map& lfm)
@@ -93,6 +104,5 @@ void free_label_features(label_feature_map& lfm)
     label_iter = lfm.iterator_next(label_iter);
   }
   lfm.clear();
-  lfm.delete_v();
 }
 }
