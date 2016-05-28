@@ -58,8 +58,12 @@ def print_nx_graph(nx_graph, amr_roots):
 	#print amr_nx_graph.edges()	
 	#print amr_root
 	#pdb.set_trace()
-	for amr_root in amr_roots:
-		print get_amr_string(amr_root, amr_nx_graph)
+	if len(amr_roots) > 1:
+		amr_nx_graph.add_node(0, instance='multi-sentence', parents=None)
+		for amr_root in amr_roots:
+			amr_nx_graph.add_edge(0, amr_root, relation='op')
+		amr_roots = [0]	
+	print get_amr_string(amr_roots[0], amr_nx_graph)
 	print
 
 if __name__ == "__main__":
