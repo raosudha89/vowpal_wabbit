@@ -56,7 +56,7 @@ search_metatask* all_metatasks[] =
   nullptr
 };   // must nullptr terminate!
 
-const bool PRINT_UPDATE_EVERY_EXAMPLE =1;
+const bool PRINT_UPDATE_EVERY_EXAMPLE =0;
 const bool PRINT_UPDATE_EVERY_PASS =0;
 const bool PRINT_CLOCK_TIME =0;
 
@@ -197,7 +197,8 @@ struct search_private
   bool force_oracle;             // insist on using the oracle to make predictions
   bool debug_oracle;             // debug the oracle
   float perturb_oracle;          // with this probability, choose a random action instead of oracle action
-
+  bool wide_output_format;
+  
   // if we're printing to stderr we need to remember if we've printed the header yet
   // (i.e., we do this if we're driving)
   bool printed_output_header;
@@ -461,7 +462,10 @@ void print_update(search_private& priv)
 { vw& all = *priv.all;
 
   if (!priv.printed_output_header && !all.quiet)
-  { const char * header_fmt = "%-10s %-10s %8s%24s %22s %5s %5s  %7s  %7s  %7s  %-8s\n";
+  { const char* header_fmt =
+        priv.wide_output_format
+        ? "%-10s %-10s %8s%49s %47s %5s %5s  %7s  %7s  %7s  %-8s\n"
+        : "%-10s %-10s %8s%24s %22s %5s %5s  %7s  %7s  %7s  %-8s\n";
     fprintf(stderr, header_fmt, "average", "since", "instance", "current true",  "current predicted", "cur",  "cur", "predic", "cache", "examples", "");
     fprintf(stderr, header_fmt, "loss",    "last",  "counter",  "output prefix",  "output prefix",    "pass", "pol", "made",    "hits",  "gener", "beta");
     std::cerr.precision(5);
@@ -471,10 +475,12 @@ void print_update(search_private& priv)
   if (!should_print_update(all, priv.hit_new_pass))
     return;
 
-  char true_label[21];
-  char pred_label[21];
-  to_short_string(priv.truth_string->str(), 20, true_label);
-  to_short_string(priv.pred_string->str() , 20, pred_label);
+  size_t label_width = priv.wide_output_format ? 45 : 20;
+  
+  char true_label[label_width + 1];
+  char pred_label[label_width + 1];
+  to_short_string(priv.truth_string->str(), label_width, true_label);
+  to_short_string(priv.pred_string->str() , label_width, pred_label);
 
   float avg_loss = 0.;
   float avg_loss_since = 0.;
@@ -2535,6 +2541,7 @@ base_learner* setup(vw&all)
   ("search_override_hook",                          "in library mode, you might want to override the (eg loaded) task with a hook; this allows that to happen")
   ("search_force_oracle",                           "always run oracle (useful for debugging oracle); use with -t for instance")
   ("search_debug_oracle",                           "run a series of debugging tests on the reference policy")
+  ("search_wide_output",                            "print wider-than-usual output (to fit structured examples)")
   ;
   add_options(all);
   po::variables_map& vm = all.vm;
@@ -2562,6 +2569,8 @@ base_learner* setup(vw&all)
   std::string rollout_string = "mix_per_state";
   std::string rollin_string = "mix_per_state";
 
+  priv.wide_output_format = vm.count("search_wide_output") > 0;
+  
   check_option<string>(task_string, all, vm, "search_task", false, string_equal,
                        "warning: specified --search_task different than the one loaded from regressor. using loaded value of: ",
                        "error: you must specify a task using --search_task");

@@ -99,7 +99,8 @@ void empty_example(vw& all, example& ec);
 void copy_example_data(bool audit, example*, example*, size_t, void(*copy_label)(void*,void*));
 void copy_example_data(bool audit, example*, example*);  // don't copy the label
 void clear_example_data(example&);  // don't clear the label
-
+void offset_example_indices(example* ec, size_t stride_shift, uint64_t mult_amount, uint64_t plus_amount);
+    
 // after export_example, must call releaseFeatureSpace to free native memory
 primitive_feature_space* export_example(vw& all, example* e, size_t& len);
 void releaseFeatureSpace(primitive_feature_space* features, size_t len);
