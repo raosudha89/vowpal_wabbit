@@ -218,4 +218,12 @@ void clear_example_data(example&ec)
   ec.end_pass = false;
   ec.sorted = false;
 }
+
+// this is totally bogus for the example -- you'd never actually do this!
+void offset_example_indices(example* ec, size_t stride_shift, uint64_t mult_amount, uint64_t plus_amount)
+{ for (features& fs : *ec)
+    for (feature_index& idx : fs.indicies)
+      idx = (((idx >> stride_shift) * mult_amount) + plus_amount) << stride_shift;
+}
+
 }

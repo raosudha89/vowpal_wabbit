@@ -3,6 +3,12 @@
   individual contributors. All rights reserved.  Released under a BSD (revised)
   license as described in the file LICENSE.
 */
+
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <sstream>
+
 #include "search_amr_parser.h"
 #include "gd.h"
 #include "cost_sensitive.h"
@@ -24,8 +30,10 @@ struct task_data
   v_array<v_array<uint32_t>> gold_heads, heads, gold_tags, tags;
   v_array<action> gold_actions, gold_action_temp;
   v_array<pair<action, float>> gold_action_losses;
+  v_array<v_array<action>> possible_concepts;
   v_array<uint32_t> children[6]; // [0]:num_left_arcs, [1]:num_right_arcs; [2]: leftmost_arc, [3]: second_leftmost_arc, [4]:rightmost_arc, [5]: second_rightmost_arc
   example * ec_buf[13];
+  std::map<std::string, v_array<action>> word_to_concept;
   LabelDict::label_feature_map concept_to_features;
 };
 
@@ -91,6 +99,55 @@ uint32_t get_count(v_array<uint32_t> v, uint32_t x)
   return ct;
 }
 
+// read a dictionary. keep AT MOST max_competitors concepts for any word. ALSO throw out anythign with count < min_count
+size_t read_word_to_concept(string fname, std::map<std::string, v_array<action>>& dict, action& num_concept, size_t max_competitors=INT_MAX, float min_count=0.)
+{ size_t max_confusion_set = 1;
+  ifstream file(fname);
+  assert(file.is_open());
+  string str;
+  string w;
+  int f;
+  float x;
+  char c;
+  v_array<pair<action,float>> tmp = v_init<pair<action,float>>();
+  while(getline(file, str))
+  { istringstream ss(str);
+    ss >> w;
+    tmp.erase();
+    while (ss)
+    { ss >> f;
+      ss >> c;
+      assert(c == ':');
+      ss >> x;
+      if (!ss) break;
+      if (x >= min_count)
+        tmp.push_back( make_pair(f,x) );
+    }
+    auto entry = dict.find(w);
+    if (entry != dict.end())
+    { cerr << "warning: word '" << w << "' appears multiple times in dictionary " << fname << "; skipping later occurances" << endl;
+      continue;
+    }
+    if (tmp.size() == 0) continue;
+    // if it's too big, we need to sort
+    if (tmp.size() > max_competitors)
+      std::sort(tmp.begin(), tmp.end(),
+                [](const pair<action,float> a, const pair<action,float> b) -> bool { return a.second > b.second; });
+    v_array<action> me = v_init<action>();
+    for (size_t i=0; i<min(max_competitors, tmp.size()); i++)
+    { action concept = tmp[i].first;
+      me.push_back(concept);
+      num_concept = max(num_concept, concept);
+      //cerr << "adding " << w << " -> " << concept << endl;
+    }
+      
+    dict.insert( make_pair(w, me) );
+    max_confusion_set = max(max_confusion_set, me.size());
+  }
+  tmp.delete_v();
+  return max_confusion_set;
+}
+  
 void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
@@ -99,10 +156,15 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   sch.set_task_data<task_data>(data);
   //sch.set_force_oracle(1);
 
+  size_t max_competitors = INT_MAX;
+  float  min_count = 0.;
+  
   new_options(all, "AMR Parser Options")
   ("amr_root_label", po::value<size_t>(&(data->amr_root_label))->default_value(1), "Ensure that there is only one root in each sentence")
   ("amr_num_label", po::value<uint32_t>(&(data->amr_num_label))->default_value(5), "Number of arc labels")
-  ("amr_num_concept", po::value<uint32_t>(&(data->amr_num_concept))->default_value(50), "Number of concepts");
+  ("amr_dictionary", po::value<string>(), "file to read word-to-concept dictionary from")
+  ("amr_dictionary_max_competitors", po::value<size_t>(&max_competitors)->default_value(INT_MAX), "restrict concept sets to at most this many items (def: infinity)")
+  ("amr_dictionary_min_count", po::value<float>(&min_count)->default_value(0.), "ignore concepts with count/value less than this number (def: 0)");
   add_options(all);
 
   check_option<size_t>(data->amr_root_label, all, vm, "amr_root_label", false, size_equal,
@@ -110,18 +172,24 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   check_option<uint32_t>(data->amr_num_label, all, vm, "amr_num_label", false, uint32_equal,
                          "warning: you specified a different value for --amr_num_label than the one loaded from regressor. proceeding with loaded value: ", "");
 
-  check_option<uint32_t>(data->amr_num_concept, all, vm, "amr_num_concept", false, uint32_equal,
-                         "warning: you specified a different value for --amr_num_concept than the one loaded from regressor. proceeding with loaded value: ", "");
-
+  if (vm.count("amr_dictionary") == 0)
+    THROW("AMR parsing needs a word-to-concept dictionary; please specify --amr_dictionary");
+  
   data->ex = VW::alloc_examples(sizeof(polylabel), 1);
   data->ex->indices.push_back(val_namespace);
   for(size_t i=1; i<14; i++)
     data->ex->indices.push_back((unsigned char)i+'A');
   data->ex->indices.push_back(constant_namespace);
 
-  sch.set_num_learners({false, false, false, false, false, false, true});
-  sch.ldf_alloc(MAX_SENT_LEN);
+  size_t max_confusion_set = read_word_to_concept(vm["amr_dictionary"].as<string>(), data->word_to_concept, data->amr_num_concept, max_competitors, min_count);
+  
+  sch.set_num_learners({false, true, false, false, false, false, true});
+  sch.ldf_alloc(max(MAX_SENT_LEN, max_confusion_set));
 
+  data->possible_concepts = v_init<v_array<action>>();
+  for (size_t i=0; i<MAX_SENT_LEN; i++)
+    data->possible_concepts.push_back(v_init<action>());
+  
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
   vector<string> newpairs(pair, pair+19);
@@ -151,6 +219,8 @@ void finish(Search::search& sch)
   for (auto&x: data->gold_tags) x.delete_v();
   for (auto*x = data->heads.begin(); x != data->heads.end_array; ++x) x->delete_v();
   for (auto*x = data->tags.begin(); x != data->tags.end_array; ++x) x->delete_v();
+  for (auto&x : data->possible_concepts) x.delete_v();
+  data->possible_concepts.delete_v();
   data->gold_heads.delete_v();
   data->gold_tags.delete_v();
   data->gold_concepts.delete_v();
@@ -172,13 +242,11 @@ void finish(Search::search& sch)
 }
 
 void inline add_feature(example& ex, uint64_t idx, unsigned char ns, uint64_t mask, uint64_t multiplier, bool audit=false)
-{
-  ex.feature_space[(int)ns].push_back(1.0f, (idx * multiplier) & mask);
+{ ex.feature_space[(int)ns].push_back(1.0f, (idx * multiplier) & mask);
 }
 
 void add_all_features(example& ex, example& src, unsigned char tgt_ns, uint64_t mask, uint64_t multiplier, uint64_t offset, bool audit=false)
-{
-  features& tgt_fs = ex.feature_space[tgt_ns];
+{ features& tgt_fs = ex.feature_space[tgt_ns];
   for (namespace_index ns : src.indices)
     if(ns != constant_namespace) // ignore constant_namespace
         for (feature_index i : src.feature_space[ns].indicies)
@@ -191,10 +259,6 @@ void inline reset_ex(example *ex)
   for (features& fs : *ex)
     fs.erase();
 }
-
-
-
-
 
 // arc-hybrid System.
 size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint32_t t_id)
@@ -606,6 +670,18 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   }
 }
 
+void get_word_possible_concepts(task_data& data, v_array<action>& possible_concepts, v_array<char>& word)
+{ string s = string(word.begin(), word.size());
+  possible_concepts.erase();
+  auto entry = data.word_to_concept.find(s);
+  if (entry == data.word_to_concept.end())
+  { cerr << "warning: word '" << s << "' not found in word-to-concept dictionary" << endl;
+    return;
+  }
+  for (action a : entry->second)
+    possible_concepts.push_back(a);
+}
+  
 void setup(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &gold_concepts=data->gold_concepts, &concepts=data->concepts;
@@ -613,6 +689,9 @@ void setup(Search::search& sch, vector<example*>& ec)
   size_t n = ec.size();
   v_array<uint32_t> empty_array = v_init<uint32_t>();
 
+  for (size_t i=0; i<n; i++)
+    get_word_possible_concepts(*data, data->possible_concepts[i], ec[i]->tag);
+  
   for (auto*x = data->heads.begin(); x != data->heads.end_array; ++x) x->delete_v();
   for (auto*x = data->tags.begin(); x != data->tags.end_array; ++x) x->delete_v();
   heads.resize(n+1);
@@ -735,12 +814,12 @@ float smatch_loss(Search::search& sch, uint64_t n)
 
 
 }
-
 void run(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &stack=data->stack, &valid_actions=data->valid_actions, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   v_array<action> &gold_actions = data->gold_actions;
+  v_array<v_array<action>>& possible_concepts = data->possible_concepts;
   v_array<uint32_t> gold_ids = v_init<uint32_t>();
   LabelDict::label_feature_map& concept_to_features = data->concept_to_features;
   LabelDict::free_label_features(data->concept_to_features);
@@ -763,7 +842,7 @@ void run(Search::search& sch, vector<example*>& ec)
   int count=1;
   size_t idx = 1;
   Search::predictor P(sch, (ptag) 0);
-
+  
   v_array<action> valid_tags = v_init<action>();
   for (action a=1; a<data->amr_num_label; a++)
     valid_tags.push_back(a);
@@ -797,7 +876,31 @@ void run(Search::search& sch, vector<example*>& ec)
       extract_features(sch, idx, ec);
 
     if (a_id == MAKE_CONCEPT)
-    { uint32_t gold_concept = gold_concepts[idx];
+    { // for LDF
+      P.erase_oracles();
+      //cerr << "possible_concepts[" << idx-1 << "] = " << possible_concepts[idx-1] << endl;
+      for (size_t i = 0; i < possible_concepts[idx-1].size(); i++)
+      { assert(i < MAX_SENT_LEN);
+        uint32_t concept = possible_concepts[idx-1][i];
+        example* ldf_ec = sch.ldf_example(i);
+        VW::clear_example_data(*ldf_ec);
+        VW::copy_example_data(false, ldf_ec, data->ex);
+        VW::offset_example_indices(ldf_ec, sch.get_stride_shift(), 28904713, 4832917 * (uint64_t)concept);
+        sch.ldf_set_label(i, concept);
+        if (concept == gold_concepts[idx])
+          P.set_oracle(i);
+      }
+      t_id = P.set_tag((ptag)count)
+          .set_input(sch.ldf_example(), possible_concepts[idx-1].size())
+          .set_condition_range(count-1, sch.get_history_length(), 'p')
+          .set_learner_id(a_id)
+          .predict();
+      cdbg << "make_concept id=" << t_id;
+      t_id = sch.ldf_get_label(t_id);
+      cdbg << ", label=" << t_id << endl;
+
+      /* original
+      uint32_t gold_concept = gold_concepts[idx];
       t_id = P.set_tag((ptag) count)
               .set_input(*(data->ex))
               .set_oracle(gold_concept)
@@ -806,6 +909,7 @@ void run(Search::search& sch, vector<example*>& ec)
               .set_learner_id(a_id)
               .predict();
       cdbg << "t_id " << t_id << endl;
+      */
       // for later hallucinations, mark a memory of the features at this concept
       LabelDict::set_label_features(concept_to_features, idx, *(data->ex));  // TODO: is idx the right place? -- Yes
     }
