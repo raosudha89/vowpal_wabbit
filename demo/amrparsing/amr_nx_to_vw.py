@@ -28,8 +28,8 @@ def traverse_depth_first(concept_nx_graph, parent=None):
 
 concept_vw_idx_dict = {}
 
-def create_training_data(sentence, span_concept, pos_line, ner_line):
-	training_data = []
+def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
+	span_concept_data = []
 	words = sentence.split()
 	words_pos = pos_line.split()
 	i = 0
@@ -51,7 +51,7 @@ def create_training_data(sentence, span_concept, pos_line, ner_line):
 			label = "_".join(labels)
 			concept_short_name = "_".join(concept_short_names)
 			concept_nx_graph_root = nx.topological_sort(concept_nx_graph)[0]
-			training_data.append([" ".join(span), " ".join(pos), label, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root])
+			span_concept_data.append([" ".join(span), " ".join(pos), label, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root])
 			#concept_vw_idx_dict[concept_nx_graph_root] = vw_idx
 			for n in concept_nx_graph.nodes():
 				concept_vw_idx_dict[n] = vw_idx #assign all nodes in the fragment the same vw_idx so that all outgoing nodes from this fragment are assigned the same vw_idx parent
@@ -59,10 +59,10 @@ def create_training_data(sentence, span_concept, pos_line, ner_line):
 		else:
 			[word_from_pos, pos] = words_pos[i].split("_")
 			assert(words[i] == word_from_pos)
-			training_data.append([words[i], pos, "NULL", "NULL", ner_line.split()[i], None])
+			span_concept_data.append([words[i], pos, "NULL", "NULL", ner_line.split()[i], None])
 			i += 1
 		vw_idx += 1
-	return training_data
+	return span_concept_data
 
 visited_nodes = []
 
@@ -190,12 +190,14 @@ def get_span_concept(alignment, root, amr_nx_graph, sentence):
 
 all_concepts = [None, "NULL"] #since null concept should be 1
 all_relations = ["NOEDGE", "ROOT_EDGE"]
+span_concept_dataset = {}
 def print_vw_format(amr_nx_graphs, amr_aggregated_metadata, output_vw_file):
 	for value in amr_nx_graphs:
 		[root, amr_nx_graph, sentence, alignments, id] = value
 		get_missing_alignment_data(root, amr_nx_graph, alignments, sentence)
 
 	global concept_vw_idx_dict
+	global span_concept_dataset
 	for value in amr_nx_graphs:
 		span_concept = {}
 		concept_vw_idx_dict = {}
@@ -204,8 +206,9 @@ def print_vw_format(amr_nx_graphs, amr_aggregated_metadata, output_vw_file):
 		for alignment in alignments.split():
 			span, concept = get_span_concept(alignment, root, amr_nx_graph, sentence)
 			span_concept[span] = concept
-		training_dataset = create_training_data(sentence, span_concept, amr_aggregated_metadata[id][1], amr_aggregated_metadata[id][2])
-		for data in training_dataset:
+		span_concept_data = create_span_concept_data(sentence, span_concept, amr_aggregated_metadata[id][1], amr_aggregated_metadata[id][2])
+		span_concept_dataset[id] = span_concept_data
+		for data in span_concept_data:
 			span = data[0]
 			pos = data[1]
 			pos = pos.replace(":", ".").replace("|", ".")
