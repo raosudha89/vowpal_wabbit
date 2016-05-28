@@ -181,6 +181,8 @@ struct search_private
 
   size_t loss_declared_cnt;      // how many times did run declare any loss (implicitly or explicitly)?
   v_array<scored_action> train_trajectory; // the training trajectory
+  v_array<action> learn_trajectory; // the learn trajectory, only recorded if record_learn_actions is true
+  bool record_learn_actions;
   size_t learn_t;                // what time step are we learning on?
   size_t learn_a_idx;            // what action index are we trying?
   bool done_with_all_actions;    // set to true when there are no more learn_a_idx to go
@@ -193,6 +195,7 @@ struct search_private
   bool last_example_was_newline; // used so we know when a block of examples has passed
   bool hit_new_pass;             // have we hit a new pass?
   bool force_oracle;             // insist on using the oracle to make predictions
+  bool debug_oracle;             // debug the oracle
   float perturb_oracle;          // with this probability, choose a random action instead of oracle action
 
   // if we're printing to stderr we need to remember if we've printed the header yet
@@ -614,6 +617,8 @@ void reset_search_structure(search_private& priv)
   priv.num_features = 0;
   priv.should_produce_string = false;
   priv.mix_per_roll_policy = -2;
+  priv.record_learn_actions = false;
+  priv.learn_trajectory.erase();
   if (priv.adaptive_beta)
   { float x = - log1pf(- priv.alpha) * (float)priv.total_examples_generated;
     static const float log_of_2 = (float)0.6931471805599453;
@@ -1521,6 +1526,9 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
     cdbg << "a=" << a << ", a_name=" << a_name << endl;
     a = a_name;
 
+    if ((priv.state == LEARN) && priv.record_learn_actions)
+      priv.learn_trajectory.push_back( a );
+    
     if (priv.metaoverride && priv.metaoverride->_post_prediction)
       priv.metaoverride->_post_prediction(*priv.metaoverride->sch, t-priv.meta_t, a, a_cost);
     return a;
@@ -1640,6 +1648,9 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
 
     if (priv.state == INIT_TRAIN)
       priv.train_trajectory.push_back( scored_action(a, a_cost) ); // note the action for future reference
+
+    if ((priv.state == LEARN) && priv.record_learn_actions)
+      priv.learn_trajectory.push_back( a );
 
     if (priv.metaoverride && priv.metaoverride->_post_prediction)
       priv.metaoverride->_post_prediction(*priv.metaoverride->sch, t-priv.meta_t, a, a_cost);
@@ -1921,6 +1932,77 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
   }
 }
 
+inline bool cmp_float(const float a, const float b) { return a < b; }
+  
+void debug_oracle(vw&all, search&sch)
+{ search_private& priv = *sch.priv;
+
+  cout << "running reference on example " << priv.ec_seq[0]->example_t << endl;
+  reset_search_structure(priv);
+  priv.state = INIT_TRAIN;
+  priv.rollin_method = ORACLE;
+  priv.rollout_method = ORACLE;
+  priv.should_produce_string = true;
+  priv.pred_string->str("");
+  run_task(sch, priv.ec_seq);
+  float ref_loss = priv.test_loss;
+  cout << "     loss: " << ref_loss << endl;
+  cout << "   output: " << priv.pred_string->str() << endl;
+  cout << "  actions:";  for (scored_action& sa : priv.train_trajectory) cout << ' ' << sa.a;  cout << endl;
+  v_array<float> osd_loss = v_init<float>();
+  bool any_better = false;
+  size_t T = priv.t;
+  for (size_t t0=0; t0<T; t0++)
+  { priv.learn_a_idx = 0;
+    priv.done_with_all_actions = false;
+    while (! priv.done_with_all_actions)
+    { reset_search_structure(priv);
+      priv.record_learn_actions = true;
+      priv.state = LEARN;
+      priv.learn_t = t0;
+      run_task(sch, priv.ec_seq);
+      osd_loss.push_back( priv.learn_loss );
+      if (priv.learn_loss < ref_loss)
+      { if (! any_better)
+        { cout << "  *warning* the following one-step deviations (loss first) outperform ref!" << endl;
+          any_better = true;
+        }
+        cout << "    perturb @ t=" << t0 << ", action=" << priv.learn_trajectory[0] << ", loss=" << priv.learn_loss << " < " << ref_loss << endl;
+        cout << "        actions: [";
+        for (size_t t=0; t<t0; t++) cout << ' ' << priv.train_trajectory[t].a;
+        cout << " ***";
+        for (action& a : priv.learn_trajectory) cout << ' ' << a;
+        cout << " ]" << endl;
+      }
+    }
+  }
+  if (!any_better)
+    cout << " osd test: pass (no one step deviation is better than ref)" << endl;
+  size_t num_eq = 0, num_lt = 0, num_gt = 0;
+  float min = FLT_MAX, mean = 0., median = 0., max = 0.;
+  for (float f : osd_loss)
+  { if (f < min) min = f;
+    if (f > max) max = f;
+    mean += f;
+    if (f < ref_loss - 1e-6) num_lt++;
+    else if (f > ref_loss + 1e-6) num_gt++;
+    else num_eq++;
+  }
+  size_t N = osd_loss.size();
+  mean /= (float)N;
+  std::sort(osd_loss.begin(), osd_loss.end(), cmp_float);
+  if (N == 0)            median = 0.;
+  else if (N == 1)       median = osd_loss[0];
+  else if ((N % 2) == 1) median = osd_loss[N/2];
+  else                   median = 0.5 * (osd_loss[N/2-1] + osd_loss[N/2]);
+  cout << "    stats: " << num_lt << " rollouts < ref, " << num_eq << " == ref, " << num_gt << " > ref; min=" << min << " mean=" << mean << " median=" << median << " max=" << max << endl;
+  
+  
+  cout << endl;
+
+  osd_loss.delete_v();
+}
+  
 
 template <bool is_learn>
 void do_actual_learning_known_task(vw&all, search& sch)
@@ -1939,23 +2021,28 @@ void do_actual_learning_known_task(vw&all, search& sch)
 
   if (priv.task->task->run_setup) priv.task->task->run_setup(sch, priv.ec_seq);
 
-  // if we're going to have to print to the screen, generate the "truth" string
-  cdbg << "======================================== GET TRUTH STRING (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
-  if (might_print_update(all))
-  { if (is_test_ex)
-      priv.truth_string->str("**test**");
-    else
-    { reset_search_structure(*sch.priv);
-      priv.state = GET_TRUTH_STRING;
-      priv.should_produce_string = true;
-      priv.truth_string->str("");
-      run_task(sch, priv.ec_seq);
+  if (priv.debug_oracle)
+  { debug_oracle(all, sch);
+  } else
+  {
+    // if we're going to have to print to the screen, generate the "truth" string
+    cdbg << "======================================== GET TRUTH STRING (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
+    if (might_print_update(all))
+    { if (is_test_ex)
+        priv.truth_string->str("**test**");
+      else
+      { reset_search_structure(*sch.priv);
+        priv.state = GET_TRUTH_STRING;
+        priv.should_produce_string = true;
+        priv.truth_string->str("");
+        run_task(sch, priv.ec_seq);
+      }
     }
-  }
 
-  add_neighbor_features(priv);
-  train_single_example<is_learn>(sch, is_test_ex, is_holdout_ex);
-  del_neighbor_features(priv);
+    add_neighbor_features(priv);
+    train_single_example<is_learn>(sch, is_test_ex, is_holdout_ex);
+    del_neighbor_features(priv);
+  }
 
   if (priv.task->task->run_takedown) priv.task->task->run_takedown(sch, priv.ec_seq);
 }
@@ -2446,6 +2533,8 @@ base_learner* setup(vw&all)
   ("search_linear_ordering",                        "insist on generating examples in linear order (def: hoopla permutation)")
   ("search_only_task",         po::value<size_t>(), "only learn this specific task (def: 0 = learn all tasks)")
   ("search_override_hook",                          "in library mode, you might want to override the (eg loaded) task with a hook; this allows that to happen")
+  ("search_force_oracle",                           "always run oracle (useful for debugging oracle); use with -t for instance")
+  ("search_debug_oracle",                           "run a series of debugging tests on the reference policy")
   ;
   add_options(all);
   po::variables_map& vm = all.vm;
@@ -2497,6 +2586,7 @@ base_learner* setup(vw&all)
   if (vm.count("search_rollout_num_steps"))       priv.rollout_num_steps    = vm["search_rollout_num_steps"].as<size_t>();
 
   if (vm.count("search_force_oracle"))            priv.force_oracle         = true;
+  if (vm.count("search_debug_oracle"))            priv.debug_oracle         = true;
 
   priv.A = vm["search"].as<size_t>();
 
