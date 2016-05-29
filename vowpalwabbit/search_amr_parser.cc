@@ -608,6 +608,7 @@ void get_word_possible_concepts(task_data& data, v_array<action>& possible_conce
   auto entry = data.word_to_concept.find(s);
   if (entry == data.word_to_concept.end())
   { cerr << "warning: word '" << s << "' not found in word-to-concept dictionary" << endl;
+    possible_concepts.push_back(NULL_CONCEPT);
     return;
   }
   for (action a : entry->second)
