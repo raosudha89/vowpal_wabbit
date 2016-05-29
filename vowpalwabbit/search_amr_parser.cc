@@ -263,28 +263,22 @@ void inline reset_ex(example *ex)
 // arc-hybrid System.
 size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint32_t t_id)
 { task_data *data = sch.get_task_data<task_data>();
-  v_array<uint32_t> &stack=data->stack, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
-  v_array<v_array<uint32_t>> &heads=data->heads, &gold_heads=data->gold_heads, &gold_tags=data->gold_tags, &tags = data->tags;
+  v_array<uint32_t> &stack=data->stack, &concepts=data->concepts;
+  v_array<v_array<uint32_t>> &heads=data->heads, &tags = data->tags;
   v_array<uint32_t> *children = data->children;
   if (a_id == MAKE_CONCEPT)
   { concepts[idx] = t_id;
     if (t_id == NULL_CONCEPT)
     {  heads[idx].push_back(NO_HEAD);
        tags[idx].push_back(NO_EDGE);
-       // sch.loss(gold_concepts[idx] != concepts[idx] ? 3.f : 0.f);
-       //cdbg << "NULL_CONCEPT" << endl;
-       //cdbg << "idx " << idx << endl;
-       //cdbg << "heads " << heads[idx] << endl;
        return idx+1;
     }
     else
-    {  //sch.loss(gold_concepts[idx] != concepts[idx] ? 1.f : 0.f);
-       return idx;
+    {   return idx;
     }
   }
   else if (a_id == SHIFT)
   { stack.push_back(idx);
-    //cdbg << "SHIFT PUSHED " << idx << endl;
     return idx+1;
   }
   else if (a_id == REDUCE_RIGHT)
@@ -295,22 +289,6 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
     children[4][hd] = last;
     children[1][hd] ++;
     tags[last].push_back(t_id);
-    //sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
-    bool wrong_head = 1;
-    bool wrong_tag = 1;
-    for(size_t i=0; i<gold_heads[last].size(); i++)
-    { if (gold_heads[last][i] == hd)
-      { wrong_head = 0;
-        if (gold_tags[last][i] == t_id)
-          wrong_tag = 0;
-      }
-    }
-    // if (wrong_head)
-    //   sch.loss(2.f);
-    // else if (wrong_tag)
-    //   sch.loss(1.f);
-    // else
-    //   sch.loss(0.f);
 
     assert(! stack.empty());
     stack.pop();
@@ -318,34 +296,14 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
   }
   else if (a_id == REDUCE_LEFT)
   { size_t last    = stack.last();
-    //cdbg << "last " << last << endl;
     heads[last].push_back(idx);
     children[3][idx] = children[2][idx];
     children[2][idx] = last;
     children[0][idx] ++;
     tags[last].push_back(t_id);
-    //sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
-    bool wrong_head = 1;
-    bool wrong_tag = 1;
-    for(size_t i=0; i<gold_heads[last].size(); i++)
-    { if (gold_heads[last][i] == idx)
-      { wrong_head = 0;
-        if (gold_tags[last][i] == t_id)
-          wrong_tag = 0;
-      }
-    }
-    // if (wrong_head)
-    //   sch.loss(2.f);
-    // else if (wrong_tag)
-    //   sch.loss(1.f);
-    // else
-    //   sch.loss(0.f);
 
     assert(! stack.empty());
     stack.pop();
-    //stack.push_back(idx);
-    //cdbg << "RL PUSHED " << idx << endl;
-    //return idx+1;
     return idx;
   }
   else if (a_id == SWAP_REDUCE_RIGHT)
@@ -361,23 +319,6 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
     children[4][third_last] = last;
     children[1][third_last] ++;
     tags[last].push_back(t_id);
-    //sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
-    bool wrong_head = 1;
-    bool wrong_tag = 1;
-    for(size_t i=0; i<gold_heads[last].size(); i++)
-    { if (gold_heads[last][i] == third_last)
-      { wrong_head = 0;
-        if (gold_tags[last][i] == t_id)
-          wrong_tag = 0;
-      }
-    }
-    //
-    // if (wrong_head)
-    //   sch.loss(2.f);
-    // else if (wrong_tag)
-    //   sch.loss(1.f);
-    // else
-    //   sch.loss(0.f);
 
     stack.push_back(third_last);
     stack.push_back(second_last);
@@ -394,27 +335,8 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
     children[2][idx] = second_last;
     children[0][idx] ++;
     tags[second_last].push_back(t_id);
-    //sch.loss(gold_heads[second_last] != heads[second_last] ? 2 : (gold_tags[second_last] != t_id) ? 1.f : 0.f);
-    bool wrong_head = 1;
-    bool wrong_tag = 1;
-    for(size_t i=0; i<gold_heads[second_last].size(); i++)
-    { if (gold_heads[second_last][i] == idx)
-      { wrong_head = 0;
-        if (gold_tags[second_last][i] == t_id)
-          wrong_tag = 0;
-      }
-    }
-    // if (wrong_head)
-    //   sch.loss(2.f);
-    // else if (wrong_tag)
-    //   sch.loss(1.f);
-    // else
-    //   sch.loss(0.f);
 
     stack.push_back(last);
-    //stack.push_back(idx);
-    //cdbg << "SRL PUSHED " << idx << endl;
-    //return idx+1;
     return idx;
    }
    else if (a_id == HALLUCINATE)
