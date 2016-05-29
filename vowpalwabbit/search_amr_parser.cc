@@ -25,6 +25,7 @@ struct task_data
 { example *ex;
   size_t amr_root_label;
   bool always_include_null_concept;
+  size_t max_hallucinate_in_a_row;
   uint32_t amr_num_label;
   uint32_t amr_num_concept;
   v_array<uint32_t> valid_actions, action_loss, stack, temp, valid_action_temp, gold_concepts, concepts;
@@ -174,6 +175,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   ("amr_root_label", po::value<size_t>(&(data->amr_root_label))->default_value(1), "Ensure that there is only one root in each sentence")
   ("amr_no_auto_null_concept", "by default all words can yield a null concept; turn on this flag to disable this")
   ("amr_num_label", po::value<uint32_t>(&(data->amr_num_label))->default_value(5), "Number of arc labels")
+  ("amr_max_hallucinate", po::value<size_t>(&(data->max_hallucinate_in_a_row))->default_value(2), "Maximum number of hallucinations in a row to avoid infinite loops (def: 2)")
   ("amr_dictionary", po::value<string>(), "file to read word-to-concept dictionary from")
   ("amr_dictionary_max_competitors", po::value<size_t>(&max_competitors)->default_value(INT_MAX), "restrict concept sets to at most this many items (def: infinity)")
   ("amr_dictionary_min_count", po::value<float>(&min_count)->default_value(0.), "ignore concepts with count/value less than this number (def: 0)");
@@ -437,7 +439,7 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
   data->ex->total_sum_feat_sq = (float) count + new_weight;
 }
 
-void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t n, uint64_t stack_depth, uint64_t state, v_array<uint32_t> &concepts)
+void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t n, uint64_t stack_depth, uint64_t state, v_array<uint32_t> &concepts, bool hallucinate_okay)
 { valid_action.erase();
   if(idx<=n && concepts[idx] == 0)
     valid_action.push_back( MAKE_CONCEPT );
@@ -451,7 +453,7 @@ void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t 
     valid_action.push_back( SWAP_REDUCE_RIGHT );
   if(stack_depth >=2 && state!=0 && idx<=n && concepts[idx] != 0)
     valid_action.push_back( SWAP_REDUCE_LEFT);
-  if(stack_depth >=1 && state!=0)
+  if(stack_depth >=1 && state!=0 && hallucinate_okay)
     valid_action.push_back( HALLUCINATE);
 }
 
@@ -462,7 +464,7 @@ bool is_valid(uint64_t action, v_array<uint32_t> valid_actions)
   return false;
 }
 
-void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<action>& gold_actions)
+void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<action>& gold_actions, bool& hallucinate_okay)
 { gold_actions.erase();
   task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &valid_actions=data->valid_actions;
@@ -491,6 +493,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   for (uint32_t i=1; i<idx; i++)
   { if ((get_count(gold_heads[i], last) > get_count(heads[i], last)) && !(v_array_contains(stack, i)))
     { gold_actions.push_back(HALLUCINATE);
+      hallucinate_okay = true;
       cdbg << "RET HALLUCINATE" << endl;
       return;
     }
@@ -793,6 +796,8 @@ void run(Search::search& sch, vector<example*>& ec)
   for (action a=1; a<data->amr_num_label; a++)
     valid_tags.push_back(a);
 
+  size_t num_hallucinate_in_a_row = 0;
+  
   //cdbg << "stack_size" << stack.size() << endl;
   while(stack.size()>1 || idx <= n)
   { bool extracted_features = false;
@@ -800,14 +805,18 @@ void run(Search::search& sch, vector<example*>& ec)
     { extract_features(sch, idx, ec);
       extracted_features = true;
     }
-    get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last(), concepts);
+    bool hallucinate_okay = num_hallucinate_in_a_row < data->max_hallucinate_in_a_row;
+    get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last(), concepts, hallucinate_okay);
 
     cdbg << "VALID ACTIONS " << valid_actions << endl;
     cdbg << "idx " << idx << endl;
     cdbg << "stack_size " << stack.size() << endl;
     size_t a_id = 0, t_id = 0;
+    bool need_to_hallucinate = false;
+    get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
+    if (need_to_hallucinate && ! hallucinate_okay)
+      valid_actions.push_back(HALLUCINATE);
 
-    get_gold_actions(sch, idx, n, gold_actions);
     cdbg << "GOLD ACTIONS " << gold_actions << endl;
     a_id= P.set_tag((ptag) count)
            .set_input(*(data->ex))
@@ -816,7 +825,9 @@ void run(Search::search& sch, vector<example*>& ec)
            .set_condition_range(count-1, sch.get_history_length(), 'p')
            .set_learner_id(0)
            .predict();
-    cdbg << "PREDICTED ACTION " << a_id << endl;
+    if (a_id == HALLUCINATE) num_hallucinate_in_a_row ++;
+    else num_hallucinate_in_a_row = 0;
+    cdbg << "PREDICTED ACTION " << a_id << ", hallucinate_okay=" << hallucinate_okay << ", need_to_hallucinate=" << need_to_hallucinate << ", num_hallucinate_in_a_row=" << num_hallucinate_in_a_row << endl;
     count++;
     if ((!extracted_features) && sch.predictNeedsExample())
       extract_features(sch, idx, ec);
@@ -1051,6 +1062,7 @@ void run(Search::search& sch, vector<example*>& ec)
       }
     }
     count++;
+
     idx = transition_hybrid(sch, a_id, idx, t_id);
   }
   //only root should be left in the stack at this point

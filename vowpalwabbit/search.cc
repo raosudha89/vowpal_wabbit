@@ -56,7 +56,7 @@ search_metatask* all_metatasks[] =
   nullptr
 };   // must nullptr terminate!
 
-const bool PRINT_UPDATE_EVERY_EXAMPLE =0;
+const bool PRINT_UPDATE_EVERY_EXAMPLE =1;
 const bool PRINT_UPDATE_EVERY_PASS =0;
 const bool PRINT_CLOCK_TIME =0;
 
@@ -387,7 +387,7 @@ int select_learner(search_private& priv, int policy, size_t learner_id, bool is_
         learner_id += 1 + (size_t)( is_training ^ (priv.all->sd->example_number % 2 == 1) );
     }
     int p = (int) (policy*priv.total_num_learners+learner_id);
-    return p;
+    return p + priv.learner_id_offset;
   }
 }
 
@@ -1222,8 +1222,7 @@ bool cached_action_store_or_find(search_private& priv, ptag mytag, const ptag* c
 }
 
 void setup_learner_id(search_private& priv, size_t learner_id)
-{ 
-  if (priv.task->learner_is_ldf != nullptr) { cdbg << "learner_is_ldf = ["; for (bool b : *priv.task->learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl; } 
+{ if (priv.task->learner_is_ldf != nullptr) { cdbg << "learner_is_ldf = ["; for (bool b : *priv.task->learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl; } 
   if (priv.is_mixed_ldf && (priv.task->learner_is_ldf != nullptr))
   { if (learner_id >= priv.task->learner_is_ldf->size())
       assert(false);
@@ -2101,7 +2100,7 @@ void do_actual_learning(vw&all, search& sch)  // first, might need to figure out
       set_multitask_id(sch, priv, task_id-1);
       return;
     } else
-      cdbg << "actual example, task_id=" << task_id << endl;
+      cdbg << "actual example" << endl;
     // actual example
     if ((priv.only_do_task == 0) || (priv.current_task + 1 == priv.only_do_task)) {
       cdbg << "calling do_actual_learning_known_task on " << priv.ec_seq.size() << " examples" << endl;
@@ -2845,8 +2844,8 @@ bool search::is_ldf() { return priv->is_ldf; }
 
 action search::predict(example& ec, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, size_t learner_id, float weight, uint32_t max_action_allowed)
 { float a_cost = 0.;
-  if (priv->multitask != nullptr)
-    learner_id = priv->multitask->size() * learner_id + priv->current_task; // TODO don't have size in the inner loop
+  //if (priv->multitask != nullptr)
+    //learner_id = priv->multitask->size() * learner_id + priv->current_task; // TODO don't have size in the inner loop
   action a = search_predict(*priv, &ec, 1, mytag, oracle_actions, oracle_actions_cnt, condition_on, condition_on_names, allowed_actions, allowed_actions_cnt, allowed_actions_cost, learner_id, a_cost, weight, max_action_allowed);
   if (priv->state == INIT_TEST) priv->test_action_sequence.push_back(a);
   if (mytag != 0)
@@ -2876,7 +2875,7 @@ action search::predictLDF(example* ecs, size_t ec_cnt, ptag mytag, const action*
 { float a_cost = 0.;
   //if (priv->multitask != nullptr)
   //  learner_id = priv->multitask->size() * learner_id + priv->current_task; // TODO don't have size in the inner loop
-  learner_id += priv->learner_id_offset;
+  //learner_id += priv->learner_id_offset;
   // TODO: action costs for ldf
   action a = search_predict(*priv, ecs, ec_cnt, mytag, oracle_actions, oracle_actions_cnt, condition_on, condition_on_names, nullptr, 0, nullptr, learner_id, a_cost, weight, 0);
   if (priv->state == INIT_TEST) priv->test_action_sequence.push_back(a);
@@ -3300,6 +3299,7 @@ predictor& predictor::set_learner_id(size_t id)
     this->is_ldf = (*this->sch.priv->task->learner_is_ldf)[id];
     this->skip_reduction_layer = this->is_ldf ? 2 : 1;
   }
+  cdbg << "set_learner_id(" << id << ") --> is_ldf=" << this->is_ldf << endl;
   return *this;
 }
 
