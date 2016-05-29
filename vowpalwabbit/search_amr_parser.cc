@@ -69,16 +69,25 @@ bool contains(v_array<uint32_t> v, uint32_t x)
            return false;
 }
 
-uint32_t contains_idx(v_array<uint32_t> v, uint32_t p)
+uint32_t contains_idx(v_array<uint32_t> v, uint32_t p,v_array<uint32_t> exclude)
 {
       if (v.empty())
            return v.size() + 10;
       uint32_t idx=0;
       for (auto*x = v.begin(); x != v.end(); ++x)
       {
-        if ( *x == p)
-          return idx;
+        if ( *x == p){
+          if (!contains(exclude,idx))
+          {
+            return idx;
+          }
+          else
+          {
+            cdbg << " Excluding " << idx << endl;
+          }
+        }
         idx += 1;
+
       }
       return v.size()+10;
 }
@@ -140,14 +149,14 @@ size_t read_word_to_concept(string fname, std::map<std::string, v_array<action>>
       num_concept = max(num_concept, concept);
       //cerr << "adding " << w << " -> " << concept << endl;
     }
-      
+
     dict.insert( make_pair(w, me) );
     max_confusion_set = max(max_confusion_set, me.size());
   }
   tmp.delete_v();
   return max_confusion_set;
 }
-  
+
 void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
@@ -158,7 +167,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 
   size_t max_competitors = INT_MAX;
   float  min_count = 0.;
-  
+
   new_options(all, "AMR Parser Options")
   ("amr_root_label", po::value<size_t>(&(data->amr_root_label))->default_value(1), "Ensure that there is only one root in each sentence")
   ("amr_num_label", po::value<uint32_t>(&(data->amr_num_label))->default_value(5), "Number of arc labels")
@@ -174,7 +183,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 
   if (vm.count("amr_dictionary") == 0)
     THROW("AMR parsing needs a word-to-concept dictionary; please specify --amr_dictionary");
-  
+
   data->ex = VW::alloc_examples(sizeof(polylabel), 1);
   data->ex->indices.push_back(val_namespace);
   for(size_t i=1; i<14; i++)
@@ -182,14 +191,14 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   data->ex->indices.push_back(constant_namespace);
 
   size_t max_confusion_set = read_word_to_concept(vm["amr_dictionary"].as<string>(), data->word_to_concept, data->amr_num_concept, max_competitors, min_count);
-  
+
   sch.set_num_learners({false, true, false, false, false, false, true});
   sch.ldf_alloc(max(MAX_SENT_LEN, max_confusion_set));
 
   data->possible_concepts = v_init<v_array<action>>();
   for (size_t i=0; i<MAX_SENT_LEN; i++)
     data->possible_concepts.push_back(v_init<action>());
-  
+
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
   vector<string> newpairs(pair, pair+19);
@@ -603,7 +612,7 @@ void get_word_possible_concepts(task_data& data, v_array<action>& possible_conce
   for (action a : entry->second)
     possible_concepts.push_back(a);
 }
-  
+
 void setup(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &gold_concepts=data->gold_concepts, &concepts=data->concepts;
@@ -613,7 +622,7 @@ void setup(Search::search& sch, vector<example*>& ec)
 
   for (size_t i=0; i<n; i++)
     get_word_possible_concepts(*data, data->possible_concepts[i], ec[i]->tag);
-  
+
   for (auto*x = data->heads.begin(); x != data->heads.end_array; ++x) x->delete_v();
   for (auto*x = data->tags.begin(); x != data->tags.end_array; ++x) x->delete_v();
   heads.resize(n+1);
@@ -703,6 +712,8 @@ float smatch_loss(Search::search& sch, uint64_t n)
 
   for (size_t i =1;i<=n;i++)
   {
+    v_array<uint32_t> exclude;
+
     cdbg << "Gold heads size " << gold_heads[i].size() << endl;
     cdbg << "Pred heads size " << heads[i].size() << endl;
     for (size_t j =0;j<gold_heads[i].size();j++)
@@ -711,7 +722,7 @@ float smatch_loss(Search::search& sch, uint64_t n)
     for (size_t j =0;j<heads[i].size();j++)
     {
       pred += 1;
-      uint32_t p = contains_idx(gold_heads[i],heads[i][j]);
+      uint32_t p = contains_idx(gold_heads[i],heads[i][j],exclude);
       cdbg << "The function " << p << endl;
       if (p != gold_heads[i].size()+ 10) {
 
@@ -719,8 +730,10 @@ float smatch_loss(Search::search& sch, uint64_t n)
         cdbg << "Gold tag " << gold_tags[i][p] << endl;
         if (tags[i][j] == gold_tags[i][p])
           correct += 1;
+          exclude.push_back(p);
       }
     }
+    exclude.erase();
   }
   cdbg << "Gold " << gold << endl;
   cdbg << "Pred  " << pred << endl;
@@ -764,7 +777,7 @@ void run(Search::search& sch, vector<example*>& ec)
   int count=1;
   size_t idx = 1;
   Search::predictor P(sch, (ptag) 0);
-  
+
   v_array<action> valid_tags = v_init<action>();
   for (action a=1; a<data->amr_num_label; a++)
     valid_tags.push_back(a);
