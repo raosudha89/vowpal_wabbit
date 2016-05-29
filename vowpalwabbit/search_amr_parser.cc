@@ -24,6 +24,7 @@ namespace AMRParserTask         {  Search::search_task task = { "amr_parser", ru
 struct task_data
 { example *ex;
   size_t amr_root_label;
+  bool always_include_null_concept;
   uint32_t amr_num_label;
   uint32_t amr_num_concept;
   v_array<uint32_t> valid_actions, action_loss, stack, temp, valid_action_temp, gold_concepts, concepts;
@@ -171,6 +172,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 
   new_options(all, "AMR Parser Options")
   ("amr_root_label", po::value<size_t>(&(data->amr_root_label))->default_value(1), "Ensure that there is only one root in each sentence")
+  ("amr_no_auto_null_concept", "by default all words can yield a null concept; turn on this flag to disable this")
   ("amr_num_label", po::value<uint32_t>(&(data->amr_num_label))->default_value(5), "Number of arc labels")
   ("amr_dictionary", po::value<string>(), "file to read word-to-concept dictionary from")
   ("amr_dictionary_max_competitors", po::value<size_t>(&max_competitors)->default_value(INT_MAX), "restrict concept sets to at most this many items (def: infinity)")
@@ -185,6 +187,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   if (vm.count("amr_dictionary") == 0)
     THROW("AMR parsing needs a word-to-concept dictionary; please specify --amr_dictionary");
 
+  data->always_include_null_concept = vm.count("amr_no_auto_null_concept") == 0;
   data->ex = VW::alloc_examples(sizeof(polylabel), 1);
   data->ex->indices.push_back(val_namespace);
   for(size_t i=1; i<14; i++)
@@ -611,8 +614,13 @@ void get_word_possible_concepts(task_data& data, v_array<action>& possible_conce
     possible_concepts.push_back(NULL_CONCEPT);
     return;
   }
+  bool got_null = false;
   for (action a : entry->second)
-    possible_concepts.push_back(a);
+  { possible_concepts.push_back(a);
+    if (a == NULL_CONCEPT) got_null = true;
+  }
+  if (data.always_include_null_concept && !got_null)
+    possible_concepts.push_back(NULL_CONCEPT);
 }
 
 void setup(Search::search& sch, vector<example*>& ec)
