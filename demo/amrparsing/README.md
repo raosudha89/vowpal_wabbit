@@ -39,3 +39,5 @@ vowpalwabbit/vw -i demo/amrparsing/train_h_np.model -t -d demo/amrparsing/train_
 
 #Cmd to run with span concept dictionary
 vowpalwabbit/vw --search 50 --search_task amr_parser --amr_dictionary demo/amrparsing/amr_hallucinate.dict  -d demo/amrparsing/amr_hallucinate.vw --search_rollin ref --search_rollout none -k -c --passes 10 --holdout_off --search_wide_output
+
+vowpalwabbit/vw -i demo/amrparsing/amr_hallucinate.model --amr_dictionary demo/amrparsing/amr_hallucinate.dict -t -d demo/amrparsing/amr_hallucinate.vw -p demo/amrparsing/amr_hallucinate.pred
