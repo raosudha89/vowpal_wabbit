@@ -1,23 +1,14 @@
 import sys, os
 import networkx as nx
 import pdb
+import pickle as p
 
 NULL_CONCEPT = 1
 
-concepts_dict = {}
-def read_concepts(concepts_dict_file):
-	for line in concepts_dict_file.readlines():
-		concepts_dict[int(line.strip().split()[1])] = line.strip().split()[0].lower()
-
-relations_dict = {}
-def read_relations(relations_dict_file):
-	for line in relations_dict_file.readlines():
-		relations_dict[int(line.strip().split()[1])] = line.strip().split()[0].lower()
-
 def to_nx_graph(all_heads, all_tags, all_concepts):
-	#print all_heads
-	#print all_tags
-	#print all_concepts
+	print all_heads
+	print all_tags
+	print all_concepts
 	amr_roots = []
 	amr_nx_graph = nx.MultiDiGraph()
 	for idx in range(1, len(all_concepts)):
@@ -28,6 +19,8 @@ def to_nx_graph(all_heads, all_tags, all_concepts):
 		if all_heads[idx][0] == 0: #this is the root
 			amr_roots.append(idx)
 			continue #so don't add any edge
+		if len(all_heads[idx]) > 1:
+			pdb.set_trace()
 		for i, parent in enumerate(all_heads[idx]):
 			amr_nx_graph.add_edge(parent, idx, relation=relations_dict[all_tags[idx][i]])
 	return amr_nx_graph, amr_roots
@@ -43,7 +36,7 @@ def get_amr_string(root, amr_nx_graph, tab_levels=1):
 			shortname_dict[child] = "c"+str(size)
 			amr_string += "\t"*tab_levels + "\t:{0} ".format(amr_nx_graph[root][child][0]['relation']) + child_amr_string
 		else:
-			amr_string += "\t:{0} {1}\n".format(shortname_dict[child], amr_nx_graph[root][child][0]['relation'])
+			amr_string += "\t:{0} {1}\n".format(amr_nx_graph[root][child][0]['relation'], shortname_dict[child])
 
 	if not root in shortname_dict.keys():
 		size = len(shortname_dict.keys())
@@ -63,8 +56,8 @@ def print_nx_graph(nx_graph, amr_roots):
 		print get_amr_string(0, amr_nx_graph)
 	elif len(amr_roots) > 1:
 		amr_nx_graph.add_node(0, instance='multi-sentence', parents=None)
-		for amr_root in amr_roots:
-			amr_nx_graph.add_edge(0, amr_root, relation='op')
+		for i, amr_root in enumerate(amr_roots):
+			amr_nx_graph.add_edge(0, amr_root, relation='snt'+str(i+1))
 		print get_amr_string(0, amr_nx_graph)
 	else:	
 		print get_amr_string(amr_roots[0], amr_nx_graph)
@@ -72,13 +65,11 @@ def print_nx_graph(nx_graph, amr_roots):
 
 if __name__ == "__main__":
 	if len(sys.argv) < 2:
-		print "usage: vw_pred_to_amr.py <data.pred> <concepts_dict> <relations_dict>"
+		print "usage: vw_pred_to_amr.py <data.pred> <all_concepts.p> <all_relations.p>"
 		sys.exit(0)
 	vw_pred_file = open(sys.argv[1], 'r')
-	concepts_dict_file = open(sys.argv[2], 'r')
-	relations_dict_file = open(sys.argv[3], 'r')
-	read_concepts(concepts_dict_file)
-	read_relations(relations_dict_file)
+	concepts_dict = p.load(open(sys.argv[2], 'rb'))
+	relations_dict = p.load(open(sys.argv[3], 'rb'))
 	all_heads = [[0]]
 	all_tags = [[0]]
 	all_concepts = [0]

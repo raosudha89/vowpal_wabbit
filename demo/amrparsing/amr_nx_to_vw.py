@@ -43,15 +43,17 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 			assert(span == span_from_pos)
 			pos = [word_pos.split("_")[1] for word_pos in words_pos[int(span_start):int(span_end)]]
 			node_list = traverse_depth_first(concept_nx_graph)
-			labels = []
+			concepts = []
 			concept_short_names = []
 			for (concept_instance, concept_var_name) in node_list:
-				labels.append(concept_instance)
+				concepts.append(concept_instance)
 				concept_short_names.append(concept_var_name)
-			label = "_".join(labels)
+			concept = "_".join(concepts)
+			if concept not in all_concepts:
+				all_concepts.append(concept)
 			concept_short_name = "_".join(concept_short_names)
 			concept_nx_graph_root = nx.topological_sort(concept_nx_graph)[0]
-			span_concept_data.append([" ".join(span), " ".join(pos), label, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root])
+			span_concept_data.append([" ".join(span), " ".join(pos), concept, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root, all_concepts.index(concept)])
 			#concept_vw_idx_dict[concept_nx_graph_root] = vw_idx
 			for n in concept_nx_graph.nodes():
 				concept_vw_idx_dict[n] = vw_idx #assign all nodes in the fragment the same vw_idx so that all outgoing nodes from this fragment are assigned the same vw_idx parent
@@ -59,7 +61,8 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 		else:
 			[word_from_pos, pos] = words_pos[i].split("_")
 			assert(words[i] == word_from_pos)
-			span_concept_data.append([words[i], pos, "NULL", "NULL", ner_line.split()[i], None])
+			concept = "NULL"
+			span_concept_data.append([words[i], pos, concept, "NULL", ner_line.split()[i], None, all_concepts.index(concept)])
 			i += 1
 		vw_idx += 1
 	return span_concept_data
@@ -210,14 +213,14 @@ def print_vw_format(amr_nx_graphs, amr_aggregated_metadata, output_vw_file):
 		span_concept_dataset[id] = span_concept_data
 		for data in span_concept_data:
 			span = data[0]
+			span = span.replace(":", ".").replace("|", ".")
 			pos = data[1]
 			pos = pos.replace(":", ".").replace("|", ".")
 			concept = data[2].lower()
-			if concept not in all_concepts:
-				all_concepts.append(concept)
 			#short_name = data[3]
 			ner = data[4]
 			node = data[5]
+			concept_idx = data[6]
 			if not node: #this is a null concept
 				#vw_string = "0 0 1 |w " + span + "|p " + pos + "|n " + ner
 				vw_string = "0 0 1 |w " + span + "|p " + pos
@@ -232,9 +235,9 @@ def print_vw_format(amr_nx_graphs, amr_aggregated_metadata, output_vw_file):
 					tags.append(relation)
 
 				if not parents: #this is the root
-					vw_string = "0 1 {} ".format(all_concepts.index(concept))
+					vw_string = "0 1 {} ".format(concept_idx)
 				else:
-					vw_string = "{} {} {} ".format(concept_vw_idx_dict[parents[0]], all_relations.index(tags[0]), all_concepts.index(concept))
+					vw_string = "{} {} {} ".format(concept_vw_idx_dict[parents[0]], all_relations.index(tags[0]), concept_idx)
 				for i in range(1, len(parents)):
 					vw_string += "{} {} ".format(concept_vw_idx_dict[parents[i]], all_relations.index(tags[i]))
 
@@ -246,7 +249,7 @@ def print_vw_format(amr_nx_graphs, amr_aggregated_metadata, output_vw_file):
 
 def main(argv):
 	if len(argv) < 2:
-		print "usage: python amr_nx_to_vw.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <output_file.vw> <output_concepts_file> <output_relations_file>"
+		print "usage: python amr_nx_to_vw.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <output_file.vw> <output_concepts.p> <output_relations.p> <span_concept_dataset.p>"
 		return
 	amr_nx_graphs_p = argv[0]
 	amr_aggregated_metadata_p = argv[1]
@@ -260,14 +263,9 @@ def main(argv):
 	amr_aggregated_metadata = pickle.load(open(amr_aggregated_metadata_p, "rb"))
 
 	print_vw_format(amr_nx_graphs, amr_aggregated_metadata, output_vw_file)
-	concepts_file = open(argv[3], 'w')
-	relations_file = open(argv[4], 'w')
-	for i in range(1, len(all_concepts)):
-		line = "{} {}\n".format(all_concepts[i], i)
-		concepts_file.write(line)
-	for i in range(len(all_relations)):
-		line = "{} {}\n".format(all_relations[i], i)
-		relations_file.write(line)	
+	pickle.dump(all_concepts, open(argv[3], 'wb'))
+	pickle.dump(all_relations, open(argv[4], 'wb'))
+	pickle.dump(span_concept_dataset, open(argv[5], 'wb'))
 	
 if __name__ == "__main__":
 	main(sys.argv[1:])
