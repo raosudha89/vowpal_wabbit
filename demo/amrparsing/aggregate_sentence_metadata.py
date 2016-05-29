@@ -4,7 +4,7 @@ import re
 
 argv = sys.argv[1:]
 if len(argv) < 4:
-	print "usage: aggregate_sentence_metadata.py <amr_file> <sentence_file> <pos_file> <ner_file> <dep_parse_file> <output_file_name>"
+	print "usage: aggregate_sentence_metadata.py <amr_file> <sentence_file> <pos_file> <ner_file> <dep_parse_file> <output_file_prefix>"
 	sys.exit()
 amr_file = open(argv[0])
 sentence_file = open(argv[1])
