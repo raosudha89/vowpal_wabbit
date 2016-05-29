@@ -813,7 +813,8 @@ void run(Search::search& sch, vector<example*>& ec)
     cdbg << "stack_size " << stack.size() << endl;
     size_t a_id = 0, t_id = 0;
     bool need_to_hallucinate = false;
-    get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
+    if (sch.predictNeedsReference())
+      get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
     if (need_to_hallucinate && ! hallucinate_okay)
       valid_actions.push_back(HALLUCINATE);
 
