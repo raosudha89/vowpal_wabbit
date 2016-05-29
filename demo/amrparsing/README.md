@@ -36,3 +36,6 @@ vowpalwabbit/vw -i demo/amrparsing/train_h_2.model -t -d demo/amrparsing/train_h
 vowpalwabbit/vw --passes 16 -d demo/amrparsing/train_h_np.vw -k -c --search_rollin oracle --search_task amr_parser --search 50 --search_alpha 1e-5  --search_rollout none  --holdout_off --search_history_length 3 --search_no_caching -b 30 --amr_root_label 1 --amr_num_label 20 --amr_num_concept 50 -f demo/amrparsing/train_h_np.model
 
 vowpalwabbit/vw -i demo/amrparsing/train_h_np.model -t -d demo/amrparsing/train_h_np.vw -p demo/amrparsing/train_h_np.pred
+
+#Cmd to run with span concept dictionary
+vowpalwabbit/vw --search 50 --search_task amr_parser --amr_dictionary demo/amrparsing/amr_hallucinate.dict  -d demo/amrparsing/amr_hallucinate.vw --search_rollin ref --search_rollout none -k -c --passes 10 --holdout_off --search_wide_output
