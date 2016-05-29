@@ -76,7 +76,8 @@ uint32_t contains_idx(v_array<uint32_t> v, uint32_t p,v_array<uint32_t> exclude)
       uint32_t idx=0;
       for (auto*x = v.begin(); x != v.end(); ++x)
       {
-        if ( *x == p){
+        if ( *x == p)
+        {
           if (!contains(exclude,idx))
           {
             return idx;
@@ -709,11 +710,9 @@ float smatch_loss(Search::search& sch, uint64_t n)
 
   // Then relations
   // For each
-
+  v_array<uint32_t> exclude = v_init<uint32_t>();
   for (size_t i =1;i<=n;i++)
   {
-    v_array<uint32_t> exclude;
-
     cdbg << "Gold heads size " << gold_heads[i].size() << endl;
     cdbg << "Pred heads size " << heads[i].size() << endl;
     for (size_t j =0;j<gold_heads[i].size();j++)
@@ -729,8 +728,11 @@ float smatch_loss(Search::search& sch, uint64_t n)
         cdbg << "Pred tag " << tags[i][j] << endl;
         cdbg << "Gold tag " << gold_tags[i][p] << endl;
         if (tags[i][j] == gold_tags[i][p])
+        {
           correct += 1;
           exclude.push_back(p);
+        }
+
       }
     }
     exclude.erase();
