@@ -1,41 +1,32 @@
 SHELL=/bin/bash
-VW=../../vowpalwabbit/vw
-python_exe=python2.7
+VW=/fs/clip-amr/vowpal_wabbit/vowpalwabbit/vw
 
-train_data=train
-test_data=test
-concepts=concepts
-relations=relations
+train_data=/fs/clip-amr/vowpal_wabbit/demo/amrparsing/data/amr-release-1.0-training-full/amr-release-1.0-training-full
+test_data=/fs/clip-amr/vowpal_wabbit/demo/amrparsing/data/amr-release-1.0-test-full/amr-release-1.0-test-full
+concepts_dict=/fs/clip-amr/vowpal_wabbit/demo/amrparsing/data/amr-release-1.0-training-full/concepts.p
+relations_dict=/fs/clip-amr/vowpal_wabbit/demo/amrparsing/data/amr-release-1.0-training-full/relations.p
+span_concepts_dict=/fs/clip-amr/vowpal_wabbit/demo/amrparsing/data/amr-release-1.0-training-full/span_concept_dict
+scripts_dir=/fs/clip-amr/vowpal_wabbit/demo/amrparsing
+smatch_dir=/fs/clip-amr/smatch_2.0
 
 .SECONDARY:
 
 all:
 	@cat README.md
 clean:
-	rm -f *.model *.predictions *.parse *.vw *.cache  *~ *.writing
-
-%.check:
-	@test -x "$$(which $*)" || {				\
-	  echo "ERROR: you need to install $*" 1>&2;		\
-	  exit 1;						\
-	}
-
-%.vw: 
-	@echo "preprocessing amr parse data ..." 1>&2
-	@echo "Note that due to the licence issue, we only provide a subset of the corpus" 1>&2
-	@$(python_exe) parse_data.py $(train_data) $(train_data).vw
-	@$(python_exe) parse_data.py $(test_data) $(test_data).vw
+	rm -f $(train_data).model $(test_data).pred $(train_data).cache  $(train_data)*.writing
 
 amr.model: $(train_data).vw
-	@$(VW) --passes 3 -d $< -k -c --search_rollin mix_per_roll --search_task amr_parser --search 4 --search_alpha 1e-5  --search_rollout oracle  --holdout_off -f $@ --search_history_length 3 --search_no_caching -b 30 --root_label 1 --num_label 4 --nn 5 --ftrl
+	@$(VW) --search 124 --search_task amr_parser --amr_num_label 124 --amr_dictionary $(span_concept_dict) -d $(train_data).vw --search_rollin ref --search_rollout none -k -c --passes 1 --holdout_off --search_no_caching -b 25 --search_alpha 1e-5 --search_history_length 3  -f $(train_data).model
 
 amr.test.predictions: $(test_data).vw amr.model
-	@$(VW) -d $< -t $(search_option) -i amr.model -p $@
-
-amr.test.parse: amr.test.predictions
-	@$(python_exe) parse_test_result.py $(test_data) $<  $(tag) > $@
+	@$(VW) -d $(test_data).vw -t --amr_dictionary $(span_concept_dict) -i $(train_data).model -p $(train_data).pred
+ 
+amr.test.parse: amr.test.predictions 
+	python $(scripts_dir)/vw_pred_to_amr.py $(train_data).pred $(concepts_dict) $(relations_dict) $(train_data).pred.amr
 
 amr.perf: amr.test.parse
-	@$(python_exe) evaluate.py amr.test.parse $(test_data)
+	source /fs/clip-amr/testENV/bin/activate	
+	python $(smatch_dir)/smatch.py -f $(train_data).aligned $(train_data).pred.amr --pr
 
 .PHONY: all clean
