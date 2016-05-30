@@ -60,7 +60,7 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 				concept_vw_idx_dict[n] = vw_idx #assign all nodes in the fragment the same vw_idx so that all outgoing nodes from this fragment are assigned the same vw_idx parent
 			i = int(span_end) 
 		else:
-			[word_from_pos, pos] = words_pos[i].split("_")
+			[word_from_pos, pos] = words_pos[i].rsplit("_", 1)
 			assert(words[i] == word_from_pos)
 			concept = "NULL"
 			span_concept_data.append([words[i], pos, concept, "NULL", ner_line.split()[i], None, all_concepts.index(concept)])
