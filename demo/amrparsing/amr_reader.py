@@ -92,7 +92,7 @@ def update_nx_graph(amr_graph_as_list, prev_level_root=None, prev_level_child_nu
 
 def main(argv):
 	if len(argv) < 1:
-		print "usage: amr_reader.py <amr_file> <output.p>"
+		print "usage: amr_reader.py amr_file output.p > readable_output"
 		return
 	amr_aligned = open(argv[0])
 	output_file_name = argv[1]
