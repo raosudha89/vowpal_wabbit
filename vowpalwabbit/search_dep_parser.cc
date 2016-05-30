@@ -119,9 +119,7 @@ void finish(Search::search& sch)
 }
 
 void inline add_feature(example& ex, uint64_t idx, unsigned char ns, uint64_t mask, uint64_t multiplier, bool audit=false)
-{
-  ex.feature_space[(int)ns].push_back(1.0f, (idx * multiplier) & mask);
-}
+{ ex.feature_space[(int)ns].push_back(1.0f, (idx * multiplier) & mask); }
 
 void add_all_features(example& ex, example& src, unsigned char tgt_ns, uint64_t mask, uint64_t multiplier, uint64_t offset, bool audit=false)
 {

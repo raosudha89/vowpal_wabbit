@@ -32,10 +32,10 @@ struct task_data
   v_array<v_array<uint32_t>> gold_heads, heads, gold_tags, tags;
   v_array<action> gold_actions, gold_action_temp;
   v_array<pair<action, float>> gold_action_losses;
-  v_array<v_array<action>> possible_concepts;
+  v_array<v_array<pair<action,float>>> possible_concepts;
   v_array<uint32_t> children[6]; // [0]:num_left_arcs, [1]:num_right_arcs; [2]: leftmost_arc, [3]: second_leftmost_arc, [4]:rightmost_arc, [5]: second_rightmost_arc
   example * ec_buf[13];
-  std::map<std::string, v_array<action>> word_to_concept;
+  std::map<std::string, v_array<pair<action,float>>> word_to_concept;
   LabelDict::label_feature_map concept_to_features;
 };
 
@@ -57,7 +57,7 @@ const int NULL_CONCEPT = 1;
 const int NO_HEAD = 0; //this is not predicted and hence can be 0
 const int NO_EDGE = 0; //this is not predicted and hence can be 0
 const int ROOT = 0;
-const int MAX_SENT_LEN = 100;
+const int MAX_SENT_LEN = 300;
 
 
 // TODO : Maybe replace by function from v_array.h ?
@@ -112,7 +112,7 @@ uint32_t get_count(v_array<uint32_t> v, uint32_t x)
 }
 
 // read a dictionary. keep AT MOST max_competitors concepts for any word. ALSO throw out anythign with count < min_count
-size_t read_word_to_concept(string fname, std::map<std::string, v_array<action>>& dict, action& num_concept, size_t max_competitors=INT_MAX, float min_count=0.)
+size_t read_word_to_concept(string fname, std::map<std::string, v_array<pair<action,float>>>& dict, action& num_concept, size_t max_competitors=INT_MAX, float min_count=0.)
 { size_t max_confusion_set = 1;
   ifstream file(fname);
   assert(file.is_open());
@@ -121,42 +121,44 @@ size_t read_word_to_concept(string fname, std::map<std::string, v_array<action>>
   int f;
   float x;
   char c;
-  v_array<pair<action,float>> tmp = v_init<pair<action,float>>();
   while(getline(file, str))
   { istringstream ss(str);
+    float total = 0.;
     ss >> w;
-    tmp.erase();
+    v_array<pair<action,float>> me = v_init<pair<action,float>>();
     while (ss)
     { ss >> f;
       ss >> c;
       assert(c == ':');
       ss >> x;
       if (!ss) break;
+      total += x;
       if (x >= min_count)
-        tmp.push_back( make_pair(f,x) );
+        me.push_back( make_pair(f,x) );
     }
     auto entry = dict.find(w);
     if (entry != dict.end())
     { cerr << "warning: word '" << w << "' appears multiple times in dictionary " << fname << "; skipping later occurances" << endl;
+      me.delete_v();
       continue;
     }
-    if (tmp.size() == 0) continue;
-    // if it's too big, we need to sort
-    if (tmp.size() > max_competitors)
-      std::sort(tmp.begin(), tmp.end(),
-                [](const pair<action,float> a, const pair<action,float> b) -> bool { return a.second > b.second; });
-    v_array<action> me = v_init<action>();
-    for (size_t i=0; i<min(max_competitors, tmp.size()); i++)
-    { action concept = tmp[i].first;
-      me.push_back(concept);
-      num_concept = max(num_concept, concept);
-      //cerr << "adding " << w << " -> " << concept << endl;
+    if ((me.size() == 0) || (total <= 0.))
+    { me.delete_v();
+      continue;
+    }
+    // sort by default
+    std::sort(me.begin(), me.end(),
+              [](const pair<action,float> a, const pair<action,float> b) -> bool { return a.second > b.second; });
+    if (me.size() > max_competitors)
+      me.resize(max_competitors);
+    for (pair<action,float>& p : me)
+    { p.second /= total;
+      num_concept = max(num_concept, p.first);
     }
 
     dict.insert( make_pair(w, me) );
     max_confusion_set = max(max_confusion_set, me.size());
   }
-  tmp.delete_v();
   return max_confusion_set;
 }
 
@@ -201,9 +203,9 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   sch.set_num_learners({false, true, false, false, false, false, true});
   sch.ldf_alloc(max(MAX_SENT_LEN, max_confusion_set));
 
-  data->possible_concepts = v_init<v_array<action>>();
+  data->possible_concepts = v_init<v_array<pair<action,float>>>();
   for (size_t i=0; i<MAX_SENT_LEN; i++)
-    data->possible_concepts.push_back(v_init<action>());
+    data->possible_concepts.push_back(v_init<pair<action,float>>());
 
   const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
   const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
@@ -439,7 +441,7 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
   data->ex->total_sum_feat_sq = (float) count + new_weight;
 }
 
-void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t n, uint64_t stack_depth, uint64_t state, v_array<uint32_t> &concepts, bool hallucinate_okay)
+void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t n, uint64_t stack_depth, uint64_t state, v_array<uint32_t> &concepts, bool hallucinate_okay, v_array<v_array<uint32_t>> &tags)
 { valid_action.erase();
   if(idx<=n && concepts[idx] == 0)
     valid_action.push_back( MAKE_CONCEPT );
@@ -454,7 +456,11 @@ void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t 
   if(stack_depth >=2 && state!=0 && idx<=n && concepts[idx] != 0)
     valid_action.push_back( SWAP_REDUCE_LEFT);
   if(stack_depth >=1 && state!=0 && hallucinate_okay)
-    valid_action.push_back( HALLUCINATE);
+    for (uint32_t i=1; i<idx; i++)
+      if (tags[i].size() > 0)
+      { valid_action.push_back( HALLUCINATE);
+        break;
+      }
 }
 
 bool is_valid(uint64_t action, v_array<uint32_t> valid_actions)
@@ -608,22 +614,22 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   }
 }
 
-void get_word_possible_concepts(task_data& data, v_array<action>& possible_concepts, v_array<char>& word)
+void get_word_possible_concepts(task_data& data, v_array<pair<action,float>>& possible_concepts, v_array<char>& word)
 { string s = string(word.begin(), word.size());
   possible_concepts.erase();
   auto entry = data.word_to_concept.find(s);
   if (entry == data.word_to_concept.end())
   { cerr << "warning: word '" << s << "' not found in word-to-concept dictionary" << endl;
-    possible_concepts.push_back(NULL_CONCEPT);
+    possible_concepts.push_back(make_pair(NULL_CONCEPT,1.0));
     return;
   }
   bool got_null = false;
-  for (action a : entry->second)
-  { possible_concepts.push_back(a);
-    if (a == NULL_CONCEPT) got_null = true;
+  for (pair<action,float>& af : entry->second)
+  { possible_concepts.push_back(af);
+    if (af.first == NULL_CONCEPT) got_null = true;
   }
   if (data.always_include_null_concept && !got_null)
-    possible_concepts.push_back(NULL_CONCEPT);
+    possible_concepts.push_back(make_pair(NULL_CONCEPT,1e-6));
 }
 
 void setup(Search::search& sch, vector<example*>& ec)
@@ -631,6 +637,8 @@ void setup(Search::search& sch, vector<example*>& ec)
   v_array<uint32_t> &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   size_t n = ec.size();
+  if (n >= MAX_SENT_LEN)
+    THROW("sentence too long, length=" << n << ", but MAX_SENT_LEN=" << MAX_SENT_LEN);
   v_array<uint32_t> empty_array = v_init<uint32_t>();
 
   for (size_t i=0; i<n; i++)
@@ -668,9 +676,9 @@ void setup(Search::search& sch, vector<example*>& ec)
     t = (costs.size() <= 1) ? (uint64_t)data->amr_root_label : costs[1].class_index;
     concept  = (costs.size() <= 2) ? 0 : costs[2].class_index;
     if (t > data->amr_num_label)
-      THROW("invalid label " << t << " which is > num actions=" << data->amr_num_label);
+      THROW("invalid label " << t << " which is > num_label=" << data->amr_num_label);
     if (concept > data->amr_num_concept)
-      THROW("invalid concept " << concept << " which is > num actions=" << data->amr_num_concept);
+      THROW("invalid concept " << concept << " which is > num_concept=" << data->amr_num_concept);
     head.push_back(h);
     tag.push_back(t);
     for (size_t j=3; j<costs.size(); j+=2)
@@ -760,20 +768,24 @@ float smatch_loss(Search::search& sch, uint64_t n)
   float smatch = (p+r > 0) ? 1 -(2*p*r/(p+r)): 1;
 
   return smatch;
-
-
 }
+
+void inline add_feature_val(example& ex, uint64_t idx, float val, unsigned char ns, uint64_t mask, uint64_t multiplier, bool audit=false)
+{ ex.feature_space[(int)ns].push_back(val, (idx * multiplier) & mask); }
+  
 void run(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &stack=data->stack, &valid_actions=data->valid_actions, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   v_array<action> &gold_actions = data->gold_actions;
-  v_array<v_array<action>>& possible_concepts = data->possible_concepts;
+  v_array<v_array<pair<action,float>>>& possible_concepts = data->possible_concepts;
   v_array<uint32_t> gold_ids = v_init<uint32_t>();
   LabelDict::label_feature_map& concept_to_features = data->concept_to_features;
   LabelDict::free_label_features(data->concept_to_features);
   concept_to_features.clear(); // erase current set of concepts
   uint64_t n = (uint64_t) ec.size();
+  if (n >= MAX_SENT_LEN)
+    THROW("sentence too long, length=" << n << ", but MAX_SENT_LEN=" << MAX_SENT_LEN);
   //cdbg << "n " << n << endl;
   stack.erase();
   for (size_t i=0; i<=n; i++)
@@ -787,6 +799,10 @@ void run(Search::search& sch, vector<example*>& ec)
   for(size_t i=0; i<6; i++)
     for(size_t j=0; j<n+1; j++)
       data->children[i][j] = 0;
+
+  vw& all = sch.get_vw_pointer_unsafe();
+  uint64_t mask = sch.get_mask();  
+  uint64_t multiplier = all.wpp << all.reg.stride_shift;
 
   int count=1;
   size_t idx = 1;
@@ -806,7 +822,7 @@ void run(Search::search& sch, vector<example*>& ec)
       extracted_features = true;
     }
     bool hallucinate_okay = num_hallucinate_in_a_row < data->max_hallucinate_in_a_row;
-    get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last(), concepts, hallucinate_okay);
+    get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last(), concepts, hallucinate_okay, tags);
 
     cdbg << "VALID ACTIONS " << valid_actions << endl;
     cdbg << "idx " << idx << endl;
@@ -839,11 +855,16 @@ void run(Search::search& sch, vector<example*>& ec)
       //cerr << "possible_concepts[" << idx-1 << "] = " << possible_concepts[idx-1] << endl;
       for (size_t i = 0; i < possible_concepts[idx-1].size(); i++)
       { assert(i < MAX_SENT_LEN);
-        uint32_t concept = possible_concepts[idx-1][i];
+        uint32_t concept = possible_concepts[idx-1][i].first;
+        float    concept_weight = possible_concepts[idx-1][i].second;
         example* ldf_ec = sch.ldf_example(i);
         VW::clear_example_data(*ldf_ec);
         VW::copy_example_data(false, ldf_ec, data->ex);
         VW::offset_example_indices(ldf_ec, sch.get_stride_shift(), 28904713, 4832917 * (uint64_t)concept);
+        add_feature_val(*ldf_ec, 481048517, 1., ' ', mask, multiplier);
+        add_feature_val(*ldf_ec, 348190573, -log(concept_weight), ' ', mask, multiplier);
+        if (i == 0)
+          add_feature_val(*ldf_ec, 4738051797, 1., ' ', mask, multiplier);
         sch.ldf_set_label(i, concept);
         if (concept == gold_concepts[idx])
           P.set_oracle(i);
@@ -1023,14 +1044,14 @@ void run(Search::search& sch, vector<example*>& ec)
       cdbg << "ldf_id " << ldf_id << endl;
       cdbg << "gold_ids " << gold_ids << endl;
       cdbg << "stack.last() " << stack.last() << endl;
-      t_id = P.set_tag((ptag) count)
+      action t_id0 = P.set_tag((ptag) count)
               .set_input(sch.ldf_example(), ldf_id)
               .set_oracle(gold_ids)
               .set_condition_range(count-1, sch.get_history_length(), 'p')
               .set_learner_id(a_id)
               .predict();
-      cdbg << "t_id " << t_id << endl;
-      t_id = sch.ldf_get_label(t_id);
+      cdbg << "t_id0 " << t_id0 << endl;
+      t_id = sch.ldf_get_label(t_id0);
       cdbg << "Predicted t_id " << t_id << endl;
       count++;
       idx = transition_hybrid(sch, a_id, idx, t_id);
