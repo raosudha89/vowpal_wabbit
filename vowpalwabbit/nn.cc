@@ -377,8 +377,8 @@ void finish(nn& n)
 base_learner* nn_setup(vw& all)
 { if (missing_option<size_t, true>(all, "nn", "Sigmoidal feedforward network with <k> hidden units"))
     return nullptr;
+  po::variables_map& vm = all.vm;
   if (vm["nn"].as<size_t>() == 0) return nullptr;
-  if (n.k == 0) return nullptr;
   new_options(all, "Neural Network options")
   ("inpass", "Train or test sigmoidal feedforward network with input passthrough.")
   ("multitask", "Share hidden layer across all reduced tasks.")
@@ -386,7 +386,6 @@ base_learner* nn_setup(vw& all)
   ("meanfield", "Train or test sigmoidal feedforward network using mean field.");
   add_options(all);
 
-  po::variables_map& vm = all.vm;
   nn& n = calloc_or_throw<nn>();
   n.all = &all;
   //first parse for number of hidden units
