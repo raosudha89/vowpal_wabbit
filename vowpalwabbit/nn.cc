@@ -448,8 +448,7 @@ base_learner* nn_setup(vw& all)
                                predict_or_learn_multi<true,true>,
                                predict_or_learn_multi<false,true>,
                                n.k+1);
-  if (n.multitask)
-    l.set_multipredict(multipredict);
+  //l.set_multipredict(multipredict);
   l.set_finish(finish);
   l.set_finish_example(finish_example);
   l.set_end_pass(end_pass);

@@ -212,7 +212,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   all.pairs.swap(newpairs);
   all.triples.swap(newtriples);
 
-  num_actions = max(max(data->amr_num_label, data->amr_num_concept), SHIFT);
+  num_actions = max(data->amr_num_label, SHIFT);
 
   for (v_string& i : all.interactions)
     i.delete_v();
