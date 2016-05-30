@@ -377,6 +377,8 @@ void finish(nn& n)
 base_learner* nn_setup(vw& all)
 { if (missing_option<size_t, true>(all, "nn", "Sigmoidal feedforward network with <k> hidden units"))
     return nullptr;
+  if (vm["nn"].as<size_t>() == 0) return nullptr;
+  if (n.k == 0) return nullptr;
   new_options(all, "Neural Network options")
   ("inpass", "Train or test sigmoidal feedforward network with input passthrough.")
   ("multitask", "Share hidden layer across all reduced tasks.")
