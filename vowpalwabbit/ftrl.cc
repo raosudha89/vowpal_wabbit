@@ -184,6 +184,11 @@ void save_load(ftrl& b, io_buf& model_file, bool read, bool text)
 void end_pass(ftrl& g)
 { vw& all = *g.all;
 
+  if (all.save_per_pass)
+    save_predictor(all, all.final_regressor_name, all.current_pass);
+
+  all.current_pass++;
+  
   if(!all.holdout_set_off)
   { if(summarize_holdout_set(all, g.no_win_counter))
       finalize_regressor(all, all.final_regressor_name);
