@@ -17,16 +17,15 @@ clean:
 	rm -f $(train_data).model $(test_data).pred $(train_data).cache  $(train_data)*.writing
 
 amr.model: $(train_data).vw
-	@$(VW) --search 124 --search_task amr_parser --amr_num_label 124 --amr_dictionary $(span_concept_dict) -d $(train_data).vw --search_rollin ref --search_rollout none -k -c --passes 1 --holdout_off --search_no_caching -b 25 --search_alpha 1e-5 --search_history_length 3  -f $(train_data).model
+	@$(VW) --search 124 --search_task amr_parser --amr_num_label 124 --amr_dictionary $(span_concepts_dict) -d $(train_data).vw --search_rollin ref --search_rollout none -k -c --passes 1 --holdout_off --search_no_caching -b 25 --search_alpha 1e-5 --search_history_length 3  -f $(train_data).model
 
 amr.test.predictions: $(test_data).vw amr.model
-	@$(VW) -d $(test_data).vw -t --amr_dictionary $(span_concept_dict) -i $(train_data).model -p $(train_data).pred
+	@$(VW) -d $(test_data).vw -t --amr_dictionary $(span_concepts_dict) -i $(train_data).model -p $(test_data).pred
  
 amr.test.parse: amr.test.predictions 
-	python $(scripts_dir)/vw_pred_to_amr.py $(train_data).pred $(concepts_dict) $(relations_dict) $(train_data).pred.amr
+	python $(scripts_dir)/vw_pred_to_amr.py $(test_data).pred $(concepts_dict) $(relations_dict) $(test_data).pred.amr
 
 amr.perf: amr.test.parse
-	source /fs/clip-amr/testENV/bin/activate	
-	python $(smatch_dir)/smatch.py -f $(train_data).aligned $(train_data).pred.amr --pr
+	python $(smatch_dir)/smatch.py -f $(test_data).aligned $(test_data).pred.amr --pr
 
 .PHONY: all clean
