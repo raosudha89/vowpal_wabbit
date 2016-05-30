@@ -26,6 +26,7 @@ struct task_data
   example * ec_buf[13];
   bool old_style_labels;
   bool cost_to_go, one_learner;
+  float weight;
 };
 
 namespace DepParserTask
@@ -67,7 +68,8 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   for(size_t i=1; i<14; i++)
     data->ex->indices.push_back((unsigned char)i+'A');
   data->ex->indices.push_back(constant_namespace);
-
+  data->weight = 1.;
+  
   data->old_style_labels = vm.count("old_style_labels") > 0;
   if(data->one_learner)
     sch.set_num_learners(1);
@@ -154,7 +156,7 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
     children[4][hd] = last;
     children[1][hd] ++;
     tags[last]      = t_id;
-    sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
+    sch.loss(data->weight * (gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f));
     assert(! stack.empty());
     stack.pop();
     return idx;
@@ -166,7 +168,7 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
     children[2][idx] = last;
     children[0][idx] ++;
     tags[last]       = t_id;
-    sch.loss(gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f);
+    sch.loss(data->weight * (gold_heads[last] != heads[last] ? 2 : (gold_tags[last] != t_id) ? 1.f : 0.f));
     assert(! stack.empty());
     stack.pop();
     return idx;
@@ -373,6 +375,7 @@ void setup(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
   size_t n = ec.size();
+  data->weight = 0.5 / (float)n;
   heads.resize(n+1);
   tags.resize(n+1);
   gold_heads.erase();
@@ -540,7 +543,7 @@ void run(Search::search& sch, vector<example*>& ec)
   }
   heads[stack.last()] = 0;
   tags[stack.last()] = (uint64_t)data->root_label;
-  sch.loss((gold_heads[stack.last()] != heads[stack.last()]));
+  sch.loss(data->weight * (gold_heads[stack.last()] != heads[stack.last()]));
   if (sch.output().good())
     for(size_t i=1; i<=n; i++)
       sch.output() << (heads[i])<<":"<<tags[i] << endl;
