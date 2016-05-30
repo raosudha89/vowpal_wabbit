@@ -27,7 +27,7 @@ def traverse_depth_first(concept_nx_graph, parent=None):
 		node_list.extend(traverse_depth_first(concept_nx_graph, parent=child)) 
 	return node_list		
 
-def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
+def create_span_concept_data(sentence, span_concept, pos_line, ner_line, all_concepts):
 	span_concept_data = []
 	words = sentence.split()
 	words_pos = pos_line.split()
@@ -48,11 +48,13 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 				concepts.append(concept_instance)
 				concept_short_names.append(concept_var_name)
 			concept = "_".join(concepts)
-			if concept not in all_concepts:
-				all_concepts.append(concept)
+			if concept not in all_concepts: #unknown concept, assign it last index
+				concept_idx = len(all_concepts)
+			else:
+				concept_idx = all_concepts.index(concept) 
 			concept_short_name = "_".join(concept_short_names)
 			concept_nx_graph_root = nx.topological_sort(concept_nx_graph)[0]
-			span_concept_data.append([" ".join(span), " ".join(pos), concept, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root, all_concepts.index(concept)])
+			span_concept_data.append([" ".join(span), " ".join(pos), concept, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root, concept_idx])
 			#concept_vw_idx_dict[concept_nx_graph_root] = vw_idx
 			for n in concept_nx_graph.nodes():
 				concept_vw_idx_dict[n] = vw_idx #assign all nodes in the fragment the same vw_idx so that all outgoing nodes from this fragment are assigned the same vw_idx parent
@@ -61,7 +63,8 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 			[word_from_pos, pos] = words_pos[i].rsplit("_", 1)
 			assert(words[i] == word_from_pos)
 			concept = "NULL"
-			span_concept_data.append([words[i], pos, concept, "NULL", ner_line.split()[i], None, all_concepts.index(concept)])
+			concept_idx = all_concepts.index(concept) 
+			span_concept_data.append([words[i], pos, concept, "NULL", ner_line.split()[i], None, concept_idx])
 			i += 1
 		vw_idx += 1
 	return span_concept_data, concept_vw_idx_dict
@@ -190,27 +193,12 @@ def get_span_concept(alignment, root, amr_nx_graph, sentence):
 				concept_nx_graph.add_edge(nodes[j], nodes[i], amr_nx_graph.get_edge_data(nodes[j], nodes[i]))
 	return (span_start, [span_end, span, concept_nx_graph])	
 
-def write_span_concept_dict(span_concept_dict, output_dict_file):
-	#Sort the concepts for each span by their frequency
-	for span, concepts in span_concept_dict.iteritems():
-		span_concept_dict[span] = OrderedDict(sorted(concepts.items(), key=lambda concepts: concepts[1], reverse=True))
-
-	for span, concepts in span_concept_dict.iteritems():
-		span_tag = span.replace(" ", "_").replace("\'", "")
-		line = span_tag + " "
-		for (concept_idx, count) in concepts.iteritems():
-			line += str(concept_idx) + ":" + str(count) + " "
-		output_dict_file.write(line+"\n")
-	
-all_concepts = [None, "NULL"] #since null concept should be 1
-all_relations = ["NOEDGE", "ROOT_EDGE"]
-def create_dataset(amr_nx_graphs, amr_aggregated_metadata):
+def create_dataset(amr_nx_graphs, amr_aggregated_metadata, all_concepts):
 	for value in amr_nx_graphs:
 		[root, amr_nx_graph, sentence, alignments, id] = value
 		get_missing_alignment_data(root, amr_nx_graph, alignments, sentence)
 
 	span_concept_dataset = {}
-	span_concept_dict = {}
 	concept_vw_idx_dict_dataset = {}
 	for value in amr_nx_graphs:
 		span_concept = {}
@@ -219,21 +207,12 @@ def create_dataset(amr_nx_graphs, amr_aggregated_metadata):
 		for alignment in alignments.split():
 			span, concept = get_span_concept(alignment, root, amr_nx_graph, sentence)
 			span_concept[span] = concept
-		span_concept_data, concept_vw_idx_dict = create_span_concept_data(sentence, span_concept, amr_aggregated_metadata[id][1], amr_aggregated_metadata[id][2])
+		span_concept_data, concept_vw_idx_dict = create_span_concept_data(sentence, span_concept, amr_aggregated_metadata[id][1], amr_aggregated_metadata[id][2], all_concepts)
 		span_concept_dataset[id] = span_concept_data
 		concept_vw_idx_dict_dataset[id] = concept_vw_idx_dict
-		for [span, pos, concept, name, ner, nx_root, concept_idx] in span_concept_data:
-			span = span.replace(" ", "_")
-			if span_concept_dict.has_key(span):
-				if span_concept_dict[span].has_key(concept_idx):
-					span_concept_dict[span][concept_idx] += 1
-				else:
-					span_concept_dict[span][concept_idx] = 1
-			else:
-				span_concept_dict[span] = {concept_idx:1}
-	return span_concept_dataset, span_concept_dict, concept_vw_idx_dict_dataset
+	return span_concept_dataset, concept_vw_idx_dict_dataset
 
-def print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dataset, output_vw_file):
+def print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dataset, all_relations, output_vw_file):
 	for value in amr_nx_graphs:
 		[root, amr_nx_graph, sentence, alignments, id] = value
 		span_concept_data = span_concept_dataset[id]
@@ -257,16 +236,18 @@ def print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dat
 				parents = [parent for parent in parents if concept_vw_idx_dict.has_key(parent)] #it has an unaligned parent concept, so remove that parent
 				for parent in parents:
 					relation = amr_nx_graph[parent][node][0]['relation'].lower()
-					if relation not in all_relations:
-						all_relations.append(relation)
+					if relation not in all_relations: #unknown relation, assign it last index
+						relation_idx = len(all_relations)
+					else:
+						relation_idx = all_relations.index(relation)
 					tags.append(relation)
 
 				if not parents: #this is the root
 					vw_string = "0 1 {} ".format(concept_idx)
 				else:
-					vw_string = "{} {} {} ".format(concept_vw_idx_dict[parents[0]], all_relations.index(tags[0]), concept_idx)
+					vw_string = "{} {} {} ".format(concept_vw_idx_dict[parents[0]], relation_idx, concept_idx)
 				for i in range(1, len(parents)):
-					vw_string += "{} {} ".format(concept_vw_idx_dict[parents[i]], all_relations.index(tags[i]))
+					vw_string += "{} {} ".format(concept_vw_idx_dict[parents[i]], relation_idx)
 
 				#vw_string += "|w " + span + "|p " + pos + "|n " + ner 
 				vw_string += "{}|w {} |p {}".format(span_tag, span, pos)
@@ -276,12 +257,14 @@ def print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dat
 
 def main(argv):
 	if len(argv) < 2:
-		print "usage: python amr_nx_to_vw.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <output_file.vw> <output_concepts.p> <output_relations.p> <span_concept_dict>"
+		print "usage: python amr_nx_to_vw.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <concepts.p> <relations.p> <output_file.vw>"
 		return
 	amr_nx_graphs_p = argv[0]
 	amr_aggregated_metadata_p = argv[1]
-	output_vw_file = open(argv[2], 'w')
-	output_dict_file = open(argv[5], 'w')
+	all_concepts = pickle.load(open(argv[2], 'rb'))
+	all_relations = pickle.load(open(argv[3], 'rb'))
+	output_vw_file = open(argv[4], 'w')
+	
 	#Format of amr_nx_graphs
 	#amr_nx_graphs = {id : [root, amr_nx_graph, sentence, alignment]}
 	amr_nx_graphs = pickle.load(open(amr_nx_graphs_p, "rb"))
@@ -290,11 +273,8 @@ def main(argv):
 	#amr_aggregated_metadata = {id : [sentence, pos, ner]}
 	amr_aggregated_metadata = pickle.load(open(amr_aggregated_metadata_p, "rb"))
 
-	span_concept_dataset, span_concept_dict, concept_vw_idx_dict_dataset = create_dataset(amr_nx_graphs, amr_aggregated_metadata)
-	write_span_concept_dict(span_concept_dict, output_dict_file)
-	print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dataset, output_vw_file)
-	pickle.dump(all_concepts, open(argv[3], 'wb'))
-	pickle.dump(all_relations, open(argv[4], 'wb'))
+	span_concept_dataset, concept_vw_idx_dict_dataset = create_dataset(amr_nx_graphs, amr_aggregated_metadata, all_concepts)
+	print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dataset, all_relations, output_vw_file)
 	
 if __name__ == "__main__":
 	main(sys.argv[1:])
