@@ -21,6 +21,29 @@
 
 namespace AMRParserTask         {  Search::search_task task = { "amr_parser", run, initialize, finish, setup, nullptr};  }
 
+struct gold_head_T
+{ v_array<uint32_t> items;   // the is what we used to use
+  v_array<uint32_t> count;   // count[i] == # of times i appears in items, for efficiency
+  gold_head_T() { items = v_init<uint32_t>(); count = v_init<uint32_t>(); }
+  void delete_v() { items.delete_v(); count.delete_v(); }
+  inline uint32_t*& begin() { return items.begin(); }
+  inline uint32_t*& end() { return items.end(); }
+  inline bool contains(uint32_t x) { return (x < count.size()) && (count[x] > 0); }
+  inline bool get_count(uint32_t x) { return (x < count.size()) ? count[x] : 0; }
+  inline size_t size() { return items.size(); }
+  inline uint32_t operator[](uint32_t i) { return items[i]; }
+  void push_back(uint32_t x)
+  { items.push_back(x);
+    if (count.size() < x+1) {
+      count.resize(x+4);
+      count.end() = count.begin() + x + 1;
+    }
+    count[x] ++;
+  }
+};
+  
+std::ostream& operator<<(std::ostream& os, const gold_head_T& v) { return (os << v.items); }
+
 struct task_data
 { example *ex;
   size_t amr_root_label;
@@ -30,7 +53,8 @@ struct task_data
   uint32_t amr_num_label;
   uint32_t amr_num_concept;
   v_array<uint32_t> valid_actions, action_loss, stack, temp, valid_action_temp, gold_concepts, concepts;
-  v_array<v_array<uint32_t>> gold_heads, heads, gold_tags, tags;
+  v_array<v_array<uint32_t>> heads, gold_tags, tags;
+  v_array<gold_head_T> gold_heads;
   v_array<action> gold_actions, gold_action_temp;
   v_array<pair<action, float>> gold_action_losses;
   v_array<v_array<pair<action,float>>> possible_concepts;
@@ -63,7 +87,7 @@ const int MAX_SENT_LEN = 300;
 
 
 // TODO : Maybe replace by function from v_array.h ?
-bool contains(v_array<uint32_t> v, uint32_t x)
+bool contains(v_array<uint32_t>& v, uint32_t x)
 {
       if (v.empty())
            return false;
@@ -73,39 +97,21 @@ bool contains(v_array<uint32_t> v, uint32_t x)
            return false;
 }
 
-uint32_t contains_idx(v_array<uint32_t> v, uint32_t p,v_array<uint32_t> exclude)
-{
-      if (v.empty())
-           return v.size() + 10;
-      uint32_t idx=0;
-      for (auto*x = v.begin(); x != v.end(); ++x)
-      {
-        if ( *x == p)
-        {
-          if (!contains(exclude,idx))
-          {
-            return idx;
-          }
-          else
-          {
-            cdbg << " Excluding " << idx << endl;
-          }
-        }
-        idx += 1;
-
-      }
-      return v.size()+10;
+uint32_t contains_idx(gold_head_T& v, uint32_t p,v_array<uint32_t>& exclude)
+{ if (v.size() == 0)
+    return v.size() + 10;
+  for (size_t idx=0; idx<v.size(); idx++)
+  { if (v[idx] == p)
+    { if (!contains(exclude,idx))
+        return idx;
+      else
+        cdbg << " Excluding " << idx << endl;
+    }
+  }
+  return v.size()+10;
 }
 
-
-// bool idx(v_array<unint32_t> v, uint32_t x)
-// {
-//
-//
-//
-// }
-
-uint32_t get_count(v_array<uint32_t> v, uint32_t x)
+uint32_t get_count(v_array<uint32_t>& v, uint32_t x)
 { uint32_t ct = 0;
   for(size_t i=0; i<v.size(); i++)
     if(v[i] == x)
@@ -113,6 +119,19 @@ uint32_t get_count(v_array<uint32_t> v, uint32_t x)
   return ct;
 }
 
+  inline bool contains_gh(gold_head_T& v, uint32_t x) { return v.contains(x); }
+  inline uint32_t get_count_gh(gold_head_T& v, uint32_t x) { return v.get_count(x); }
+  /*
+    uint32_t c = v.get_count(x);
+    uint32_t c2 = get_count(v.items, x);
+    if (c != c2) cerr << '(' << c << ' ' << c2 << '|' << v.items << '/' << v.count << ')';
+    return c2;
+  }
+  */
+  //inline bool contains_gh(gold_head_T& v, uint32_t x) { return contains(v.items, x); }
+  //inline uint32_t get_count_gh(gold_head_T& v, uint32_t x) { return get_count(v.items, x); }
+  
+  
 // read a dictionary. keep AT MOST max_competitors concepts for any word. ALSO throw out anythign with count < min_count
 size_t read_word_to_concept(string fname, std::map<std::string, v_array<pair<action,float>>>& dict, action& num_concept, size_t max_competitors=INT_MAX, float min_count=0.)
 { size_t max_confusion_set = 1;
@@ -210,12 +229,34 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   for (size_t i=0; i<MAX_SENT_LEN; i++)
     data->possible_concepts.push_back(v_init<pair<action,float>>());
 
-  const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
-  const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
-  vector<string> newpairs(pair, pair+19);
-  vector<string> newtriples(triple, triple+12);
+  // features are:
+  //    B - stack[-1]
+  //    C - stack[-2]
+  //    D - stack[-3]
+  //    E - buffer[0]
+  //    F - buffer[1]
+  //    G - buffer[2]
+  //    H - closest-on-left-child-of-stack[-1]
+  //    I - 2nd-closest-on-left-child-of-stack[-1]
+  //    J - closest-on-right-child-of-stack[-1]
+  //    K - 2nd-closest-on-right-child-of-stack[-1]
+  //    L - closest-on-left-child-of-buffer[0]
+  //    M - 2nd-closest-on-left-child-of-buffer[1]
+  //    N - nothing???
+  //    d - valency features
+
+  const char* pair[] = { "BE", "BC", "CE", "BD", "dB", "dC", "dD", "dE", "Bh", "dh" };
+  vector<string> newpairs(pair, pair+11);
+  
+  //const char* pair[] = { "BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd",
+  //                       "Bh", "Ch", "Eh", "Dh", "Fh", "Gh", "Hh", "Jh", "Lh", "dh" };
+  //vector<string> newpairs(pair, pair+29);
+  //const char* pair[] = {"Bh", "Ch", "Eh", "Dh", "Fh", "Gh", "Hh", "Jh", "Lh", "dh" };
+  //vector<string> newpairs(pair, pair+10);
   all.pairs.swap(newpairs);
-  all.triples.swap(newtriples);
+  //const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
+  //vector<string> newtriples(triple, triple+12);
+  //all.triples.swap(newtriples);
 
   num_actions = max(data->amr_num_label, SHIFT);
 
@@ -224,8 +265,8 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   all.interactions.erase();
   for (string& i : all.pairs)
     all.interactions.push_back(string2v_string(i));
-  for (string& i : all.triples)
-    all.interactions.push_back(string2v_string(i));
+  //for (string& i : all.triples)
+  //all.interactions.push_back(string2v_string(i));
   sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING | IS_MIXED_LDF);
 
   sch.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
@@ -496,23 +537,24 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
 { gold_actions.erase();
   task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &valid_actions=data->valid_actions;
-  v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads;
+  v_array<v_array<uint32_t>> &heads=data->heads;
+  v_array<gold_head_T>& gold_heads = data->gold_heads;
   size_t size = stack.size();
   size_t last = (size==0) ? 0 : stack.last();
 
-  if (size >=2 && is_valid(SWAP_REDUCE_LEFT, valid_actions) && contains(gold_heads[stack[size-2]], idx))
+  if (size >=2 && is_valid(SWAP_REDUCE_LEFT, valid_actions) && contains_gh(gold_heads[stack[size-2]], idx))
   { gold_actions.push_back(SWAP_REDUCE_LEFT);
     cdbg << "RET SRL" << endl;
     return;
   }
 
-  if (is_valid(REDUCE_LEFT,valid_actions) && contains(gold_heads[last], idx))
+  if (is_valid(REDUCE_LEFT,valid_actions) && contains_gh(gold_heads[last], idx))
   { gold_actions.push_back(REDUCE_LEFT);
     cdbg << "RET RL" << endl;
     return;
   }
 
-  if (is_valid(SHIFT,valid_actions) &&( stack.empty() || contains(gold_heads[idx], last))) // becoz if we take any ohter action, we will lose this edge
+  if (is_valid(SHIFT,valid_actions) &&( stack.empty() || contains_gh(gold_heads[idx], last))) // becoz if we take any ohter action, we will lose this edge
   { gold_actions.push_back(SHIFT);
     cdbg << "RET SH" << endl;
     return;
@@ -520,7 +562,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
 
   if (is_valid(HALLUCINATE,valid_actions))
   { for (uint32_t i=1; i<idx; i++)
-    { if ((get_count(gold_heads[i], last) > get_count(heads[i], last)) && !(v_array_contains(stack, i)))
+    { if ((get_count_gh(gold_heads[i], last) > get_count(heads[i], last)) && !(v_array_contains(stack, i)))
       { gold_actions.push_back(HALLUCINATE);
         hallucinate_okay = true;
         cdbg << "RET HALLUCINATE" << endl;
@@ -539,81 +581,81 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
 
   if (size >= 3)
   { for(size_t i = 0; i<size-2; i++)
-      if(idx <=n && (contains(gold_heads[stack[i]], idx) || contains(gold_heads[idx], stack[i])))
+      if(idx <=n && (contains_gh(gold_heads[stack[i]], idx) || contains_gh(gold_heads[idx], stack[i])))
         action_loss[SHIFT] += 1; // Edges to and from idx to anything in stack before size-2 is lost
   }
-  if(size>0 && contains(gold_heads[last], idx))
+  if(size>0 && contains_gh(gold_heads[last], idx))
     action_loss[SHIFT] += 1; //we can't do REDUCE_RIGHT anymore
-  if(size>=2 && contains(gold_heads[stack[size-2]], idx))
+  if(size>=2 && contains_gh(gold_heads[stack[size-2]], idx))
     action_loss[SHIFT] += 1; //we can't do SWAP_REDUCE_RIGHT anymore
 
   //Losses for REDUCE_LEFT action
 
-  if(size>0 && !contains(gold_heads[last], idx)) //If no such edge exists then add loss
+  if(size>0 && !contains_gh(gold_heads[last], idx)) //If no such edge exists then add loss
     action_loss[REDUCE_LEFT] +=1;
 
   if(size>0)
   { //Edge to and from last to anything in buffer is lost
     for(size_t i = idx+1; i<=n; i++)
-      if(contains(gold_heads[i], last) || (contains(gold_heads[last], i) && gold_heads[last].size() == 1))
+      if(contains_gh(gold_heads[i], last) || (contains_gh(gold_heads[last], i) && gold_heads[last].size() == 1))
         action_loss[REDUCE_LEFT] +=1;
-    if(idx <=n && contains(gold_heads[idx], last))
+    if(idx <=n && contains_gh(gold_heads[idx], last))
       action_loss[REDUCE_LEFT] +=1;
   }
-  if(size>=2 && contains(gold_heads[last], stack[size-2]) && gold_heads[last].size() == 1) //i.e. we can't do REDUCE_RIGHT anymore
+  if(size>=2 && contains_gh(gold_heads[last], stack[size-2]) && gold_heads[last].size() == 1) //i.e. we can't do REDUCE_RIGHT anymore
     action_loss[REDUCE_LEFT] += 1;
-  if(size>=3 && contains(gold_heads[last], stack[size-3]) && gold_heads[last].size() == 1) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
+  if(size>=3 && contains_gh(gold_heads[last], stack[size-3]) && gold_heads[last].size() == 1) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
     action_loss[REDUCE_LEFT] += 1;
 
   //Losses for REDUCE_RIGHT action
 
-  if(size>1 && !contains(gold_heads[last], stack[size-2])) //If no such edge exists then add loss
+  if(size>1 && !contains_gh(gold_heads[last], stack[size-2])) //If no such edge exists then add loss
     action_loss[REDUCE_RIGHT] +=1;
 
   if(size>0 && gold_heads[last][0] >=idx && gold_heads[last].size() == 1) // we assume here that every node has only one head. Hallucinated nodes will take care of co-ref
     action_loss[REDUCE_RIGHT] +=1; //Any heads to last from buffer are lost
-  if(size>=3 && contains(gold_heads[last], stack[size-3]) && gold_heads[last].size() == 1)
+  if(size>=3 && contains_gh(gold_heads[last], stack[size-3]) && gold_heads[last].size() == 1)
     action_loss[REDUCE_RIGHT] +=1;
   if(size>0)
   {
     for(size_t i = idx; i<=n; i++)
-      if(contains(gold_heads[i], last))
+      if(contains_gh(gold_heads[i], last))
         action_loss[REDUCE_RIGHT] +=1; //Any dependents of last in buffer are lost
   }
 
   //Losses for SWAP_REDUCE_LEFT action
 
-  if(size>1 && !contains(gold_heads[stack[size-2]], idx)) //If no such edge exists then add loss
+  if(size>1 && !contains_gh(gold_heads[stack[size-2]], idx)) //If no such edge exists then add loss
    action_loss[SWAP_REDUCE_LEFT] +=1;
 
   if(size >= 2)
-  { if(size>=3 && contains(gold_heads[stack[size-2]], stack[size-3]))
+  { if(size>=3 && contains_gh(gold_heads[stack[size-2]], stack[size-3]))
       action_loss[SWAP_REDUCE_LEFT] +=1; //we can't do REDUCE_RIGHT when second_last comes on top of stack anymore
-    if(size>=4 && contains(gold_heads[stack[size-2]], stack[size-4]))
+    if(size>=4 && contains_gh(gold_heads[stack[size-2]], stack[size-4]))
       action_loss[SWAP_REDUCE_LEFT] +=1; //we can't do SWAP_REDUCE_RIGHT when second_last comes on top of stack anymore
     //Edges to and from second_last to anything in buffer are lost
     for(size_t i=idx+1; i<=n; i++)
-      if( (contains(gold_heads[stack[size-2]], i) && gold_heads[stack[size-2]].size() == 1) || contains(gold_heads[i], stack[size-2]))
+      if( (contains_gh(gold_heads[stack[size-2]], i) && gold_heads[stack[size-2]].size() == 1) || contains_gh(gold_heads[i], stack[size-2]))
         action_loss[SWAP_REDUCE_LEFT] +=1;
-    if(idx <=n && contains(gold_heads[idx], stack[size-2]))
+    if(idx <=n && contains_gh(gold_heads[idx], stack[size-2]))
       action_loss[SWAP_REDUCE_LEFT] +=1; //if idx was child of second_last, we have lost it
-    if(contains(gold_heads[stack[size-1]], stack[size-2]))
+    if(contains_gh(gold_heads[stack[size-1]], stack[size-2]))
       action_loss[SWAP_REDUCE_LEFT] +=1; //if last was child of second_last, we have lost it
-    //if(contains(gold_heads[stack[size-1]], idx))
+    //if(contains_gh(gold_heads[stack[size-1]], idx))
     //  action_loss[SWAP_REDUCE_LEFT] +=1;
 
   }
 
   //Losses for SWAP_REDUCE_RIGHT action
 
-  if(size>=3 && !contains(gold_heads[last], stack[size-3])) //If no such edge exists then add loss
+  if(size>=3 && !contains_gh(gold_heads[last], stack[size-3])) //If no such edge exists then add loss
     action_loss[SWAP_REDUCE_RIGHT] +=1;
 
   if(size>0)
   { for(size_t i=idx; i<=n; i++)
-      if( (contains(gold_heads[last], i) && gold_heads[last].size() == 1) || contains(gold_heads[i], last))
+      if( (contains_gh(gold_heads[last], i) && gold_heads[last].size() == 1) || contains_gh(gold_heads[i], last))
         action_loss[SWAP_REDUCE_RIGHT] +=1;
-    if(size>=2 && contains(gold_heads[last], stack[size-2]))
+    if(size>=2 && contains_gh(gold_heads[last], stack[size-2]))
       action_loss[SWAP_REDUCE_RIGHT] +=1;
   }
 
@@ -659,11 +701,13 @@ void get_word_possible_concepts(task_data& data, v_array<pair<action,float>>& po
 void setup(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &gold_concepts=data->gold_concepts, &concepts=data->concepts;
-  v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
+  v_array<v_array<uint32_t>> &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
+  v_array<gold_head_T>& gold_heads = data->gold_heads;
   size_t n = ec.size();
   if (n >= MAX_SENT_LEN)
     THROW("sentence too long, length=" << n << ", but MAX_SENT_LEN=" << MAX_SENT_LEN);
   v_array<uint32_t> empty_array = v_init<uint32_t>();
+  gold_head_T empty_gold_head;
 
   for (size_t i=0; i<n; i++)
     get_word_possible_concepts(*data, data->possible_concepts[i], ec[i]->tag);
@@ -680,7 +724,7 @@ void setup(Search::search& sch, vector<example*>& ec)
 
   for (auto&x: gold_heads) x.delete_v();
   gold_heads.erase();
-  gold_heads.push_back(empty_array);
+  gold_heads.push_back(empty_gold_head);
   gold_heads[0].push_back(0);
 
   for (auto&x: gold_tags) x.delete_v();
@@ -693,7 +737,7 @@ void setup(Search::search& sch, vector<example*>& ec)
 
   for (size_t i=0; i<n; i++)
   { v_array<COST_SENSITIVE::wclass>& costs = ec[i]->l.cs.costs;
-    v_array<uint32_t> head = v_init<uint32_t>();
+    gold_head_T head;
     v_array<uint32_t> tag = v_init<uint32_t>();
     size_t h, t, concept;
     h = (costs.size() == 0) ? 0 : costs[0].class_index;
@@ -735,7 +779,8 @@ float smatch_loss(Search::search& sch, uint64_t n)
 
   task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &gold_concepts=data->gold_concepts, &concepts=data->concepts;
-  v_array<v_array<uint32_t>> &heads=data->heads, &gold_heads=data->gold_heads, &gold_tags=data->gold_tags, &tags = data->tags;
+  v_array<v_array<uint32_t>> &heads=data->heads, &gold_tags=data->gold_tags, &tags = data->tags;
+  v_array<gold_head_T>& gold_heads = data->gold_heads;
   float correct = 0,pred = 0,gold = 0;
   // First, we calculate score of concepts - we don't care about root
   for (size_t i=1;i<=n;i++) {
@@ -796,12 +841,16 @@ float smatch_loss(Search::search& sch, uint64_t n)
 }
 
 void inline add_feature_val(example& ex, uint64_t idx, float val, unsigned char ns, uint64_t mask, uint64_t multiplier, bool audit=false)
-{ ex.feature_space[(int)ns].push_back(val, (idx * multiplier) & mask); }
+{ ex.feature_space[(int)ns].push_back(val, (idx * multiplier) & mask);
+  ex.num_features += 1;
+  ex.total_sum_feat_sq += val*val;
+}
   
 void run(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &stack=data->stack, &valid_actions=data->valid_actions, &gold_concepts=data->gold_concepts, &concepts=data->concepts;
-  v_array<v_array<uint32_t>> &gold_heads=data->gold_heads, &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
+  v_array<v_array<uint32_t>> &heads=data->heads, &gold_tags=data->gold_tags, &tags=data->tags;
+  v_array<gold_head_T>& gold_heads = data->gold_heads;
   v_array<action> &gold_actions = data->gold_actions;
   v_array<v_array<pair<action,float>>>& possible_concepts = data->possible_concepts;
   v_array<uint32_t> gold_ids = v_init<uint32_t>();
@@ -858,7 +907,7 @@ void run(Search::search& sch, vector<example*>& ec)
     //if (sch.predictNeedsReference())
     //  get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
     get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
-    if (need_to_hallucinate && ! hallucinate_okay)
+    if ((!sch.is_test()) && need_to_hallucinate && (!hallucinate_okay) && (num_hallucinate_in_a_row < 10)) // strict upper bound of 10
       valid_actions.push_back(HALLUCINATE);
 
     a_id= P.set_tag((ptag) count)
@@ -898,13 +947,17 @@ void run(Search::search& sch, vector<example*>& ec)
         uint32_t concept = possible_concepts[idx-1][i].first;
         float    concept_weight = possible_concepts[idx-1][i].second;
         example* ldf_ec = sch.ldf_example(i);
-        VW::clear_example_data(*ldf_ec);
-        VW::copy_example_data(false, ldf_ec, data->ex);
-        VW::offset_example_indices(ldf_ec, sch.get_stride_shift(), 28904713, 4832917 * (uint64_t)concept);
-        add_feature_val(*ldf_ec, 481048517, 1., ' ', mask, multiplier);
-        add_feature_val(*ldf_ec, 348190573, -log(concept_weight), ' ', mask, multiplier);
-        if (i == 0)
-          add_feature_val(*ldf_ec, 4738051797, 1., ' ', mask, multiplier);
+        if (sch.predictNeedsExample())
+        { VW::clear_example_data(*ldf_ec);
+          VW::copy_example_data(false, ldf_ec, data->ex);
+          VW::offset_example_indices(ldf_ec, sch.get_stride_shift(), 28904713, 4832917 * (uint64_t)concept);
+          char ns = ' ';
+          ldf_ec->indices.push_back(ns);
+          add_feature_val(*ldf_ec, 481048517, 1., ns, mask, multiplier);
+          add_feature_val(*ldf_ec, 348190573, -log(concept_weight), ns, mask, multiplier);
+          if (i == 0)
+            add_feature_val(*ldf_ec, 4738051797, 1., ns, mask, multiplier);
+        }
         sch.ldf_set_label(i, concept);
         if (concept == gold_concepts[idx])
           P.set_oracle(i);
@@ -1072,13 +1125,15 @@ void run(Search::search& sch, vector<example*>& ec)
       for (uint32_t i=1; i<idx; i++)
       { if (tags[i].size() >  0) //node is already assigned a parent
         { example* ldf_ec = sch.ldf_example(ldf_id);
-          sch.ldf_set_label(ldf_id, i);
           cdbg << "(ldf_id, i) " << ldf_id << "," << i << endl;
-          VW::clear_example_data(*ldf_ec);  // erase whatever is in there
-          VW::copy_example_data(false, ldf_ec, data->ex);  // copy the current parser state
-          LabelDict::add_example_namespace_from_memory(concept_to_features, *ldf_ec, i, 'h');  // put memory features into namespace 'h'
-          // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
-          if (get_count(gold_heads[i], stack.last()) > get_count(heads[i], stack.last()))
+          if (sch.predictNeedsExample())
+          { VW::clear_example_data(*ldf_ec);  // erase whatever is in there
+            VW::copy_example_data(false, ldf_ec, data->ex);  // copy the current parser state
+            LabelDict::add_example_namespace_from_memory(concept_to_features, *ldf_ec, i, 'h');  // put memory features into namespace 'h'
+            // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
+          }
+          sch.ldf_set_label(ldf_id, i);
+          if (get_count_gh(gold_heads[i], stack.last()) > get_count(heads[i], stack.last()))
             gold_ids.push_back(ldf_id);
           ldf_id++;
         }
@@ -1132,7 +1187,7 @@ void run(Search::search& sch, vector<example*>& ec)
   //only root should be left in the stack at this point
   heads[stack.last()].push_back(0);
   tags[stack.last()].push_back((uint64_t)data->amr_root_label);
-  //if (!contains(gold_heads[stack.last()], 0))
+  //if (!contains_gh(gold_heads[stack.last()], 0))
   //  sch.loss(1.f);
   float s = smatch_loss(sch,n);
   cdbg << "Setting smatch loss here " << s << endl;
