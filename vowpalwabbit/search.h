@@ -173,6 +173,9 @@ struct search
   void set_num_learners(size_t num_learners);
   void set_num_learners(std::initializer_list<bool>); // |vec| = # of learners, vec[i] = is_ldf for learner i
 
+  // check to see if we're running in test mode
+  bool is_test();
+  
   // get the action sequence from the test run (only run if test_only or -t or...)
   void get_test_action_sequence(vector<action>&);
 

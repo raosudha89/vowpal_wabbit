@@ -2971,6 +2971,8 @@ void search::set_num_learners(size_t num_learners)
   cdbg << "learner_is_ldf = ["; for (bool b : *this->priv->task->learner_is_ldf) cdbg << ' ' << b; cdbg << " ]" << endl;
 }
 
+bool search::is_test() { return this->priv->state == INIT_TEST; }
+  
 void search::add_program_options(po::variables_map& /*vw*/, po::options_description& opts) { add_options( *this->priv->all, opts ); }
 
 uint64_t search::get_mask() { return this->priv->all->reg.weight_mask;}

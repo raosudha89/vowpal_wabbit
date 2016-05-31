@@ -194,12 +194,16 @@ void clear_example_data(example&ec)
 { ec.weight = 0.;
   ec.tag.erase();
   ec.example_counter = 0;
-  ec.indices.erase();
-  for (size_t i=0; i<256; i++)
-  { ec.feature_space[i].values.erase();
-    ec.feature_space[i].indicies.erase();
-    ec.feature_space[i].space_names.erase();
+  //for (size_t i=0; i<256; i++)
+  for (auto i : ec.indices)
+  { ec.feature_space[i].values.end() = ec.feature_space[i].values.begin();
+    ec.feature_space[i].indicies.end() = ec.feature_space[i].indicies.begin();
+    ec.feature_space[i].space_names.end() = ec.feature_space[i].space_names.begin();
+    //ec.feature_space[i].values.erase();
+    //ec.feature_space[i].indicies.erase();
+    //ec.feature_space[i].space_names.erase();
   }
+  ec.indices.erase();
   ec.ft_offset = 0;
   ec.skip_reduction_layer = 0;
   ec.num_features = 0;
