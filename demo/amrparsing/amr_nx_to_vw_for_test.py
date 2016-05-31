@@ -48,13 +48,13 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line, all_con
 				concepts.append(concept_instance)
 				concept_short_names.append(concept_var_name)
 			concept = "_".join(concepts)
-			if concept not in all_concepts: #unknown concept, assign it last index
-				concept_idx = len(all_concepts)
+			if concept not in all_concepts: #unknown concept, assign it index of UNK
+				concept_idx = all_concepts.index("UNK")
 			else:
 				concept_idx = all_concepts.index(concept) 
 			concept_short_name = "_".join(concept_short_names)
 			concept_nx_graph_root = nx.topological_sort(concept_nx_graph)[0]
-			span_concept_data.append([" ".join(span), " ".join(pos), concept, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root, concept_idx])
+			span_concept_data.append([" ".join(span).lower(), " ".join(pos), concept, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root, concept_idx])
 			#concept_vw_idx_dict[concept_nx_graph_root] = vw_idx
 			for n in concept_nx_graph.nodes():
 				concept_vw_idx_dict[n] = vw_idx #assign all nodes in the fragment the same vw_idx so that all outgoing nodes from this fragment are assigned the same vw_idx parent
@@ -64,7 +64,7 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line, all_con
 			assert(words[i] == word_from_pos)
 			concept = "NULL"
 			concept_idx = all_concepts.index(concept) 
-			span_concept_data.append([words[i], pos, concept, "NULL", ner_line.split()[i], None, concept_idx])
+			span_concept_data.append([words[i].lower(), pos, concept, "NULL", ner_line.split()[i], None, concept_idx])
 			i += 1
 		vw_idx += 1
 	return span_concept_data, concept_vw_idx_dict
@@ -236,8 +236,8 @@ def print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dat
 				parents = [parent for parent in parents if concept_vw_idx_dict.has_key(parent)] #it has an unaligned parent concept, so remove that parent
 				for parent in parents:
 					relation = amr_nx_graph[parent][node][0]['relation'].lower()
-					if relation not in all_relations: #unknown relation, assign it last index
-						relation_idx = len(all_relations)
+					if relation not in all_relations: #unknown relation, assign it index of UNK
+						relation_idx =  all_relations.index("UNK")
 					else:
 						relation_idx = all_relations.index(relation)
 					tags.append(relation)
@@ -257,7 +257,7 @@ def print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dat
 
 def main(argv):
 	if len(argv) < 2:
-		print "usage: python amr_nx_to_vw.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <concepts.p> <relations.p> <output_file.vw>"
+		print "usage: python amr_nx_to_vw_for_test.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <concepts.p> <relations.p> <output_file.vw>"
 		return
 	amr_nx_graphs_p = argv[0]
 	amr_aggregated_metadata_p = argv[1]
