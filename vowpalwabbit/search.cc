@@ -31,6 +31,7 @@ namespace MC = MULTICLASS;
 
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
+#define DEBUG_REF true
 
 namespace Search
 {
@@ -1247,6 +1248,7 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
     for (size_t i=0; i<losses.cs.costs.size(); i++) losses.cs.costs[i].x = (losses.cs.costs[i].x - min_loss) * weight;
   }
   cdbg << "losses = ["; for (size_t i=0; i<losses.cs.costs.size(); i++) cdbg << ' ' << losses.cs.costs[i].class_index << ':' << losses.cs.costs[i].x; cdbg << " ], min_loss=" << min_loss << endl;
+  if (DEBUG_REF) { cerr << "losses ="; for (auto& wc : losses.cs.costs) cerr << ' ' << wc.class_index << ':' << wc.x; cerr << endl; }
 
   priv.total_example_t += 1.;   // TODO: should be max-min
 
@@ -1468,6 +1470,8 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
     { priv.done_with_all_actions = true;
       priv.learn_learner_id = learner_id;
 
+      if (DEBUG_REF) { cerr << "OR{"; for (size_t _i=0; _i<oracle_actions_cnt; _i++) cerr << ' ' << oracle_actions[_i]; cerr << "}\t"; }
+      
       // set reference or copy example(s)
       if (oracle_actions_cnt > 0) priv.learn_oracle_action = oracle_actions[0];
       priv.learn_ec_ref_cnt = ec_cnt;

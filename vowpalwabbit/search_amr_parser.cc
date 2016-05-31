@@ -506,8 +506,6 @@ void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t 
 { valid_action.erase();
   if(idx<=n && concepts[idx] == 0)
     valid_action.push_back( MAKE_CONCEPT );
-  if(idx<=n && concepts[idx] != 0)
-    valid_action.push_back( SHIFT );
   if(stack_depth >=2)
     valid_action.push_back( REDUCE_RIGHT );
   if(stack_depth >=1 && state!=0 && idx<=n && concepts[idx] != 0)
@@ -522,6 +520,8 @@ void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t 
       { valid_action.push_back( HALLUCINATE);
         break;
       }
+  if(idx<=n && concepts[idx] != 0)
+    valid_action.push_back( SHIFT );
 }
 
 bool is_valid(uint64_t action, v_array<uint32_t> valid_actions)
