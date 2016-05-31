@@ -48,6 +48,7 @@ struct task_data
 { example *ex;
   size_t amr_root_label;
   bool always_include_null_concept;
+  bool use_gold_concepts;
   size_t max_hallucinate_in_a_row;
   uint32_t amr_num_label;
   uint32_t amr_num_concept;
@@ -198,6 +199,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   ("amr_no_auto_null_concept", "by default all words can yield a null concept; turn on this flag to disable this")
   ("amr_num_label", po::value<uint32_t>(&(data->amr_num_label))->default_value(5), "Number of arc labels")
   ("amr_max_hallucinate", po::value<size_t>(&(data->max_hallucinate_in_a_row))->default_value(2), "Maximum number of hallucinations in a row to avoid infinite loops (def: 2)")
+  ("use_gold_concepts", po::value<bool>(&(data->use_gold_concepts))->default_value(false), "turn on this flag to use gold concepts at test time")
   ("amr_dictionary", po::value<string>(), "file to read word-to-concept dictionary from")
   ("amr_dictionary_max_competitors", po::value<size_t>(&max_competitors)->default_value(INT_MAX), "restrict concept sets to at most this many items (def: infinity)")
   ("amr_dictionary_min_count", po::value<float>(&min_count)->default_value(0.), "ignore concepts with count/value less than this number (def: 0)");
@@ -558,12 +560,14 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     return;
   }
 
-  for (uint32_t i=1; i<idx; i++)
-  { if ((get_count_gh(gold_heads[i], last) > get_count(heads[i], last)) && !(v_array_contains(stack, i)))
-    { gold_actions.push_back(HALLUCINATE);
-      hallucinate_okay = true;
-      cdbg << "RET HALLUCINATE" << endl;
-      return;
+  if (is_valid(HALLUCINATE,valid_actions))
+  { for (uint32_t i=1; i<idx; i++)
+    { if ((get_count_gh(gold_heads[i], last) > get_count(heads[i], last)) && !(v_array_contains(stack, i)))
+      { gold_actions.push_back(HALLUCINATE);
+        hallucinate_okay = true;
+        cdbg << "RET HALLUCINATE" << endl;
+        return;
+      }
     }
   }
 
@@ -913,9 +917,12 @@ void run(Search::search& sch, vector<example*>& ec)
            .set_condition_range(count-1, sch.get_history_length(), 'p')
            .set_learner_id(0)
            .predict();
-
+    
     if (sch.is_test() == true) //this is test time, so update action_confusion_matrix
-    { //cerr << "GOLD ACTIONS " << gold_actions << endl;
+    { if (data->use_gold_concepts && contains(gold_actions, MAKE_CONCEPT))
+        a_id = MAKE_CONCEPT;
+     
+      //cerr << "GOLD ACTIONS " << gold_actions << endl;
       if (contains(gold_actions, a_id))
         data->action_confusion_matrix[a_id-1][a_id-1] += 1;
 	  else
@@ -964,6 +971,8 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = sch.ldf_get_label(t_id);
       cdbg << ", label=" << t_id << endl;
 
+	  if (data->use_gold_concepts && sch.is_test())
+        t_id = gold_concepts[idx];
       /* original
       uint32_t gold_concept = gold_concepts[idx];
       t_id = P.set_tag((ptag) count)
