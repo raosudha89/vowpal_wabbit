@@ -227,12 +227,33 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   for (size_t i=0; i<MAX_SENT_LEN; i++)
     data->possible_concepts.push_back(v_init<pair<action,float>>());
 
-  const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd",
-                        "Bh", "Ch", "Eh", "Dh", "Fh", "Gh", "Hh", "Jh", "Lh", "dh" };
-  //const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
-  vector<string> newpairs(pair, pair+29);
-  //vector<string> newtriples(triple, triple+12);
+  // features are:
+  //    B - stack[-1]
+  //    C - stack[-2]
+  //    D - stack[-3]
+  //    E - buffer[0]
+  //    F - buffer[1]
+  //    G - buffer[2]
+  //    H - closest-on-left-child-of-stack[-1]
+  //    I - 2nd-closest-on-left-child-of-stack[-1]
+  //    J - closest-on-right-child-of-stack[-1]
+  //    K - 2nd-closest-on-right-child-of-stack[-1]
+  //    L - closest-on-left-child-of-buffer[0]
+  //    M - 2nd-closest-on-left-child-of-buffer[1]
+  //    N - nothing???
+  //    d - valency features
+
+  const char* pair[] = { "BE", "BC", "CE", "BD", "dB", "dC", "dD", "dE", "Bh", "dh" };
+  vector<string> newpairs(pair, pair+11);
+  
+  //const char* pair[] = { "BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd",
+  //                       "Bh", "Ch", "Eh", "Dh", "Fh", "Gh", "Hh", "Jh", "Lh", "dh" };
+  //vector<string> newpairs(pair, pair+29);
+  //const char* pair[] = {"Bh", "Ch", "Eh", "Dh", "Fh", "Gh", "Hh", "Jh", "Lh", "dh" };
+  //vector<string> newpairs(pair, pair+10);
   all.pairs.swap(newpairs);
+  //const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
+  //vector<string> newtriples(triple, triple+12);
   //all.triples.swap(newtriples);
 
   num_actions = max(data->amr_num_label, SHIFT);
@@ -882,7 +903,7 @@ void run(Search::search& sch, vector<example*>& ec)
     //if (sch.predictNeedsReference())
     //  get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
     get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
-    if (need_to_hallucinate && ! hallucinate_okay)
+    if ((!sch.is_test()) && need_to_hallucinate && (!hallucinate_okay) && (num_hallucinate_in_a_row < 10)) // strict upper bound of 10
       valid_actions.push_back(HALLUCINATE);
 
     a_id= P.set_tag((ptag) count)
@@ -1095,14 +1116,14 @@ void run(Search::search& sch, vector<example*>& ec)
       for (uint32_t i=1; i<idx; i++)
       { if (tags[i].size() >  0) //node is already assigned a parent
         { example* ldf_ec = sch.ldf_example(ldf_id);
-          sch.ldf_set_label(ldf_id, i);
           cdbg << "(ldf_id, i) " << ldf_id << "," << i << endl;
           if (sch.predictNeedsExample())
           { VW::clear_example_data(*ldf_ec);  // erase whatever is in there
             VW::copy_example_data(false, ldf_ec, data->ex);  // copy the current parser state
             LabelDict::add_example_namespace_from_memory(concept_to_features, *ldf_ec, i, 'h');  // put memory features into namespace 'h'
+            // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
           }
-          // ^^^----- note, we want to do quadratic between 'h' and any namespace in the normal features
+          sch.ldf_set_label(ldf_id, i);
           if (get_count_gh(gold_heads[i], stack.last()) > get_count(heads[i], stack.last()))
             gold_ids.push_back(ldf_id);
           ldf_id++;
