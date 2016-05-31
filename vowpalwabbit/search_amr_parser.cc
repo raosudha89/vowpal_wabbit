@@ -660,23 +660,20 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   }
 
   // return the best actions
-  size_t best_action = 2;
-  size_t count = 0;
-  for(size_t i=2; i<=NUM_ACTIONS; i++)
+  size_t best_action = 1;
+  for(size_t i=1; i<NUM_ACTIONS; i++) //Exclude SHIFT for now
     if(action_loss[i] < action_loss[best_action])
     { best_action= i;
-      count = 1;
       gold_actions.erase();
       gold_actions.push_back((uint32_t)i);
     }
     else if (action_loss[i] == action_loss[best_action])
-    { count++;
-      gold_actions.push_back(i);
+    { gold_actions.push_back(i);
     }
-  // return 1 only if no other action is better than 1
-  if (action_loss[1] < action_loss[best_action])
+  // return SHIFT only if no other action is better than SHIFT
+  if (action_loss[SHIFT] < action_loss[best_action])
   { gold_actions.erase();
-    gold_actions.push_back((uint32_t)1);
+    gold_actions.push_back((uint32_t)SHIFT);
   }
 }
 
