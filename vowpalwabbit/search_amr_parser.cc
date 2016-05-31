@@ -227,9 +227,10 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   for (size_t i=0; i<MAX_SENT_LEN; i++)
     data->possible_concepts.push_back(v_init<pair<action,float>>());
 
-  const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd"};
+  const char* pair[] = {"BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd",
+                        "Bh", "Ch", "Eh", "Dh", "Fh", "Gh", "Hh", "Jh", "Lh", "dh" };
   //const char* triple[] = {"EFG", "BEF", "BCE", "BCD", "BEL", "ELM", "BHI", "BCC", "BEJ", "BEH", "BJK", "BEN"};
-  vector<string> newpairs(pair, pair+19);
+  vector<string> newpairs(pair, pair+29);
   //vector<string> newtriples(triple, triple+12);
   all.pairs.swap(newpairs);
   //all.triples.swap(newtriples);
