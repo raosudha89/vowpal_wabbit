@@ -246,7 +246,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   //    d - valency features
 
   const char* pair[] = { "BE", "BC", "CE", "BD", "dB", "dC", "dD", "dE", "Bh", "dh" };
-  vector<string> newpairs(pair, pair+11);
+  vector<string> newpairs(pair, pair+10);
   
   //const char* pair[] = { "BC", "BE", "BB", "CC", "DD", "EE", "FF", "GG", "EF", "BH", "BJ", "EL", "dB", "dC", "dD", "dE", "dF", "dG", "dd",
   //                       "Bh", "Ch", "Eh", "Dh", "Fh", "Gh", "Hh", "Jh", "Lh", "dh" };

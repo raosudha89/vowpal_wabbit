@@ -31,7 +31,8 @@ namespace MC = MULTICLASS;
 
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
-#define DEBUG_REF true
+
+#define DEBUG_REF false
 
 namespace Search
 {
