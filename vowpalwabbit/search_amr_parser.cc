@@ -187,6 +187,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
   data->action_loss.resize(NUM_ACTIONS+1);
+  data->action_loss.end() = data->action_loss.begin() + NUM_ACTIONS + 1;
   data->ex = NULL;
   sch.set_task_data<task_data>(data);
   //sch.set_force_oracle(1);
@@ -534,8 +535,7 @@ bool is_valid(uint64_t action, v_array<uint32_t> valid_actions)
 }
 
 void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<action>& gold_actions, bool& hallucinate_okay)
-{ gold_actions.erase();
-  task_data *data = sch.get_task_data<task_data>();
+{ task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &action_loss = data->action_loss, &stack = data->stack, &valid_actions=data->valid_actions;
   v_array<v_array<uint32_t>> &heads=data->heads;
   v_array<gold_head_T>& gold_heads = data->gold_heads;
@@ -675,6 +675,7 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   { gold_actions.erase();
     gold_actions.push_back((uint32_t)SHIFT);
   }
+  if (sch.at_learning_point()) cerr << endl << "AL = " << action_loss;
 }
 
 void get_word_possible_concepts(task_data& data, v_array<pair<action,float>>& possible_concepts, v_array<char>& word)
@@ -901,8 +902,8 @@ void run(Search::search& sch, vector<example*>& ec)
     cdbg << "stack_size " << stack.size() << endl;
     size_t a_id = 0, t_id = 0;
     bool need_to_hallucinate = false;
+    gold_actions.erase();
     //if (sch.predictNeedsReference())
-    //  get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
     get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
     if ((!sch.is_test()) && need_to_hallucinate && (!hallucinate_okay) && (num_hallucinate_in_a_row < 10)) // strict upper bound of 10
       valid_actions.push_back(HALLUCINATE);

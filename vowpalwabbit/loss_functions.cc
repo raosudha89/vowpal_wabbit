@@ -124,7 +124,7 @@ public:
 
   float getLoss(shared_data*, float prediction, float label)
   { if (label != -1.f && label != 1.f)
-      cerr << "You are using label " << label << " not -1 or 1 as loss function expects!" << endl;
+      cerr << "hingeloss: You are using label " << label << " not -1 or 1 as loss function expects!" << endl;
     float e = 1 - label*prediction;
     return (e > 0) ? e : 0;
   }
@@ -168,7 +168,7 @@ public:
 
   float getLoss(shared_data*, float prediction, float label)
   { if (label != -1.f && label != 1.f)
-      cerr << "You are using label " << label << " not -1 or 1 as loss function expects!" << endl;
+      cerr << "logloss: You are using label " << label << " not -1 or 1 as loss function expects!" << endl;
     return log(1 + correctedExp(-label * prediction));
   }
 

@@ -15,7 +15,7 @@ void predict_or_learn(char&, LEARNER::base_learner& base, example& ec)
 
   if (ec.l.simple.label != FLT_MAX)
   { if ((fabs(ec.l.simple.label) != 1.f) && (ec.l.simple.weight > 0.))
-     cerr << "You are using label " << ec.l.simple.label << " not -1 or 1 as loss function expects!" << endl;
+     cerr << "binary.cc: You are using label " << ec.l.simple.label << " not -1 or 1 as loss function expects!" << endl;
     else if (ec.l.simple.label == ec.pred.scalar)
       ec.loss = 0.;
     else

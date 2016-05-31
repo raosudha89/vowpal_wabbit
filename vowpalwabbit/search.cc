@@ -32,7 +32,7 @@ namespace MC = MULTICLASS;
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 
-#define DEBUG_REF false
+#define DEBUG_REF true
 
 namespace Search
 {
@@ -1238,6 +1238,7 @@ void setup_learner_id(search_private& priv, size_t learner_id)
 void generate_training_example(search_private& priv, polylabel& losses, float weight, bool add_conditioning=true, float min_loss=FLT_MAX)    // min_loss = FLT_MAX means "please compute it for me as the actual min"; any other value means to use this
 { // should we really subtract out min-loss?
   //float min_loss = FLT_MAX;
+  if (DEBUG_REF) { cerr << "losses ="; for (auto& wc : losses.cs.costs) cerr << ' ' << wc.class_index << ':' << wc.x; cerr << endl; }
   if (priv.cb_learner)
   { if (min_loss == FLT_MAX)
       for (size_t i=0; i<losses.cb.costs.size(); i++) min_loss = MIN(min_loss, losses.cb.costs[i].cost);
@@ -1249,7 +1250,6 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
     for (size_t i=0; i<losses.cs.costs.size(); i++) losses.cs.costs[i].x = (losses.cs.costs[i].x - min_loss) * weight;
   }
   cdbg << "losses = ["; for (size_t i=0; i<losses.cs.costs.size(); i++) cdbg << ' ' << losses.cs.costs[i].class_index << ':' << losses.cs.costs[i].x; cdbg << " ], min_loss=" << min_loss << endl;
-  if (DEBUG_REF) { cerr << "losses ="; for (auto& wc : losses.cs.costs) cerr << ' ' << wc.class_index << ':' << wc.x; cerr << endl; }
 
   priv.total_example_t += 1.;   // TODO: should be max-min
 
@@ -1850,7 +1850,7 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
   // SPEEDUP: if the oracle was never called, we can skip this!
 
   // do a pass over the data allowing oracle
-  cdbg << "======================================== INIT TRAIN (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
+  cerr << "======================================== INIT TRAIN (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
   //cerr << "training" << endl;
 
   clear_cache_hash_map(priv);
@@ -1875,7 +1875,7 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
   }
 
   // otherwise, we have some learn'in to do!
-  cdbg << "======================================== LEARN (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
+  cerr << "======================================== LEARN (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
   priv.T = priv.metatask ? priv.meta_t : priv.t;
   get_training_timesteps(priv, priv.timesteps);
   cdbg << "train_trajectory.size() = " << priv.train_trajectory.size() << ":\t";
@@ -2977,7 +2977,12 @@ void search::set_num_learners(size_t num_learners)
 }
 
 bool search::is_test() { return this->priv->state == INIT_TEST; }
-  
+bool search::at_learning_point()
+{
+  return priv->state == LEARN &&
+      priv->t == priv->learn_t;
+}
+    
 void search::add_program_options(po::variables_map& /*vw*/, po::options_description& opts) { add_options( *this->priv->all, opts ); }
 
 uint64_t search::get_mask() { return this->priv->all->reg.weight_mask;}

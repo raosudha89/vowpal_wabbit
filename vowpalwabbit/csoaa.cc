@@ -45,7 +45,9 @@ inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
     }
   }
   else
+  { if (classificationesque) ec.l.simple.label = 1.;
     base.predict(ec, i-1);
+  }
   
   partial_prediction = ec.partial_prediction;
   if (ec.partial_prediction < score || (ec.partial_prediction == score && i < prediction))
