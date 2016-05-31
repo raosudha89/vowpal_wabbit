@@ -76,6 +76,7 @@ shortname_dict = {}
 def get_amr_string(root, amr_nx_graph, tab_levels=1):
 	amr_string = ""
 	#print amr_nx_graph.successors(root)
+	global shortname_dict
 	for child in amr_nx_graph.successors(root):
 		if not child in shortname_dict.keys():
 			size = len(shortname_dict.keys())

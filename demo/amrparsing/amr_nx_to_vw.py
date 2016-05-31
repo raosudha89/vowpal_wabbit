@@ -293,6 +293,8 @@ def main(argv):
 	span_concept_dataset, span_concept_dict, concept_vw_idx_dict_dataset = create_dataset(amr_nx_graphs, amr_aggregated_metadata)
 	write_span_concept_dict(span_concept_dict, output_dict_file)
 	print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dataset, output_vw_file)
+	all_concepts.append("UNK") #for unknown concepts during test time
+	all_relations.append("UNK") #for unknown relations during test time
 	pickle.dump(all_concepts, open(argv[3], 'wb'))
 	pickle.dump(all_relations, open(argv[4], 'wb'))
 	
