@@ -61,6 +61,7 @@ struct task_data
   example * ec_buf[13];
   std::map<std::string, v_array<pair<action,float>>> word_to_concept;
   LabelDict::label_feature_map concept_to_features;
+  v_array<v_array<uint32_t>> action_confusion_matrix;
 };
 
 namespace AMRParserTask
@@ -157,7 +158,7 @@ size_t read_word_to_concept(string fname, std::map<std::string, v_array<pair<act
     }
     auto entry = dict.find(w);
     if (entry != dict.end())
-    { cerr << "warning: word '" << w << "' appears multiple times in dictionary " << fname << "; skipping later occurances" << endl;
+    { //cerr << "warning: word '" << w << "' appears multiple times in dictionary " << fname << "; skipping later occurances" << endl;
       me.delete_v();
       continue;
     }
@@ -245,10 +246,29 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING | IS_MIXED_LDF);
 
   sch.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
+  cerr << "Initialize called " << endl; 
+  //Action confusion matrix for debugging; row=gold_action col=predicted_action
+  data->action_confusion_matrix.resize(NUM_ACTIONS);
+  for (size_t i=0; i<NUM_ACTIONS; i++)
+  { data->action_confusion_matrix[i].resize(NUM_ACTIONS);
+    for (size_t j=0; j<NUM_ACTIONS; j++)
+    {  data->action_confusion_matrix[i][j] = 0;
+    }
+  }
 }
 
 void finish(Search::search& sch)
 { task_data* data = sch.get_task_data<task_data>();
+  if (sch.is_test() == true) //this is test time, so print action_confusion_matrix
+  { cerr << "Action Confusion Matrix"<< endl;
+    for (size_t i=0; i<NUM_ACTIONS; i++)
+    { cerr << "action=" << i+1 << "  ";
+      for (size_t j=0; j<NUM_ACTIONS; j++)
+		cerr << data->action_confusion_matrix[i][j] << " ";
+	  cerr << endl;
+	}  
+  }
+
   data->valid_actions.delete_v();
   data->valid_action_temp.delete_v();
   for (auto&x: data->gold_heads) x.delete_v();
@@ -639,7 +659,7 @@ void get_word_possible_concepts(task_data& data, v_array<pair<action,float>>& po
   possible_concepts.erase();
   auto entry = data.word_to_concept.find(s);
   if (entry == data.word_to_concept.end())
-  { cerr << "warning: word '" << s << "' not found in word-to-concept dictionary" << endl;
+  { //cerr << "warning: word '" << s << "' not found in word-to-concept dictionary" << endl;
     possible_concepts.push_back(make_pair(NULL_CONCEPT,1.0));
     return;
   }
@@ -725,6 +745,7 @@ void setup(Search::search& sch, vector<example*>& ec)
   }
   for(size_t i=0; i<6; i++)
     data->children[i].resize(n+(size_t)1);
+ 
 }
 
 float smatch_loss(Search::search& sch, uint64_t n)
@@ -807,6 +828,7 @@ void run(Search::search& sch, vector<example*>& ec)
   v_array<action> &gold_actions = data->gold_actions;
   v_array<v_array<pair<action,float>>>& possible_concepts = data->possible_concepts;
   v_array<uint32_t> gold_ids = v_init<uint32_t>();
+  
   LabelDict::label_feature_map& concept_to_features = data->concept_to_features;
   LabelDict::free_label_features(data->concept_to_features);
   concept_to_features.clear(); // erase current set of concepts
@@ -856,12 +878,12 @@ void run(Search::search& sch, vector<example*>& ec)
     cdbg << "stack_size " << stack.size() << endl;
     size_t a_id = 0, t_id = 0;
     bool need_to_hallucinate = false;
-    if (sch.predictNeedsReference())
-      get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
+    //if (sch.predictNeedsReference())
+    //  get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
+    get_gold_actions(sch, idx, n, gold_actions, need_to_hallucinate);
     if (need_to_hallucinate && ! hallucinate_okay)
       valid_actions.push_back(HALLUCINATE);
 
-    cdbg << "GOLD ACTIONS " << gold_actions << endl;
     a_id= P.set_tag((ptag) count)
            .set_input(*(data->ex))
            .set_oracle(gold_actions)
@@ -869,6 +891,17 @@ void run(Search::search& sch, vector<example*>& ec)
            .set_condition_range(count-1, sch.get_history_length(), 'p')
            .set_learner_id(0)
            .predict();
+
+    if (sch.is_test() == true) //this is test time, so update action_confusion_matrix
+    { //cerr << "GOLD ACTIONS " << gold_actions << endl;
+      if (contains(gold_actions, a_id))
+        data->action_confusion_matrix[a_id-1][a_id-1] += 1;
+	  else
+      { for (size_t i=0; i<gold_actions.size(); i++)  
+	      data->action_confusion_matrix[gold_actions[i]-1][a_id-1] += 1;
+      }
+    } 
+
     if (a_id == HALLUCINATE) num_hallucinate_in_a_row ++;
     else num_hallucinate_in_a_row = 0;
     cdbg << "PREDICTED ACTION " << a_id << ", hallucinate_okay=" << hallucinate_okay << ", need_to_hallucinate=" << need_to_hallucinate << ", num_hallucinate_in_a_row=" << num_hallucinate_in_a_row << endl;
@@ -1142,7 +1175,7 @@ void run(Search::search& sch, vector<example*>& ec)
     }
     cdbg << "output = " << endl << sch.output().str() << endl;
   }
-
+  
   valid_tags.delete_v();
   gold_ids.delete_v();
 }
