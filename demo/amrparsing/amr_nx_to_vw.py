@@ -52,7 +52,7 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 				all_concepts.append(concept)
 			concept_short_name = "_".join(concept_short_names)
 			concept_nx_graph_root = nx.topological_sort(concept_nx_graph)[0]
-			span_concept_data.append([" ".join(span), " ".join(pos), concept, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root, all_concepts.index(concept)])
+			span_concept_data.append([" ".join(span).lower(), " ".join(pos), concept, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root, all_concepts.index(concept)])
 			#concept_vw_idx_dict[concept_nx_graph_root] = vw_idx
 			for n in concept_nx_graph.nodes():
 				concept_vw_idx_dict[n] = vw_idx #assign all nodes in the fragment the same vw_idx so that all outgoing nodes from this fragment are assigned the same vw_idx parent
@@ -61,7 +61,7 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 			[word_from_pos, pos] = words_pos[i].rsplit("_", 1)
 			assert(words[i] == word_from_pos)
 			concept = "NULL"
-			span_concept_data.append([words[i], pos, concept, "NULL", ner_line.split()[i], None, all_concepts.index(concept)])
+			span_concept_data.append([words[i].lower(), pos, concept, "NULL", ner_line.split()[i], None, all_concepts.index(concept)])
 			i += 1
 		vw_idx += 1
 	return span_concept_data, concept_vw_idx_dict
@@ -201,6 +201,7 @@ def write_span_concept_dict(span_concept_dict, output_dict_file):
 		for (concept_idx, count) in concepts.iteritems():
 			line += str(concept_idx) + ":" + str(count) + " "
 		output_dict_file.write(line+"\n")
+	output_dict_file.write("UNK " + str(len(span_concept_dict)) + ":1\n")
 	
 all_concepts = [None, "NULL"] #since null concept should be 1
 all_relations = ["NOEDGE", "ROOT_EDGE"]
