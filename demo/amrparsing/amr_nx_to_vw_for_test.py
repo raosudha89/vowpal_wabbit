@@ -3,6 +3,10 @@ import cPickle as pickle
 import networkx as nx
 import string
 from collections import OrderedDict
+import re
+from nltk.stem import PorterStemmer
+from nltk.stem import WordNetLemmatizer
+from nltk.corpus import stopwords
 import pdb
 
 def traverse_depth_first(concept_nx_graph, parent=None):
@@ -27,6 +31,70 @@ def traverse_depth_first(concept_nx_graph, parent=None):
 		node_list.extend(traverse_depth_first(concept_nx_graph, parent=child)) 
 	return node_list		
 
+vnpb_words_concepts_dict=None
+
+def create_concept_for_unknown_span(span, pos, ner):
+	if vnpb_words_concepts_dict.has_key(span):
+		#return [concept for concept in vnpb_words_concepts_dict[span]]
+		return vnpb_words_concepts_dict[span][0] #Return just the first one for now
+	concept = ""	
+	if "<" and ">" in ner:
+		r = re.search("(.*?)<(.*?)>(.*?)", ner)	
+		ner = r.group(2).lower()
+		if ner == "date":
+			ner = "date-entity"
+			date_words = span.strip().replace(",","")
+			date_words = "/".join(date_words.split())
+			try:
+				d = datetime.datetime.strptime(date_words, "%B/%d/%Y")
+				concept = ner + "_" + str(d.year) + "_" + str(d.month).lstrip('0') + "_" + str(d.day).lstrip('0')
+			except:
+				try:
+					d = datetime.datetime.strptime(date_words, "%d/%B/%Y")	
+					concept = ner + "_" + str(d.year) + "_" + str(d.month).lstrip('0') + "_" + str(d.day).lstrip('0')
+				except:
+					try:
+						d = datetime.datetime.strptime(date_words, "%B/%Y")	
+						concept = ner + "_" + str(d.year) + "_" + str(d.month).lstrip('0') + "_X"
+					except:
+						if re.search("([0-9]{4})",span.split()[0]):
+							yyyy = span.split()[0]
+							concept = ner + "_" + yyyy + "_X_X"
+						else:
+							concept = ner + "_"
+							concept += "_".join("\"" + w + "\"" for w in span.split())  
+		else:
+			if ner == "location": ner = "country"
+			concept = ner + "_name_"
+			concept += "_".join("\"" + w + "\"" for w in span.split())
+		return concept
+
+	is_date = re.search("([0-9]*)-([0-9]*)-([0-9]*)", span.split()[0])
+	if is_date:
+		yyyy = is_date.group(1)
+		mm = is_date.group(2)
+		dd = is_date.group(3)
+		concept = "date-entity_" + yyyy + "_" + mm + "_" + dd
+		return concept
+	
+	is_date = re.search("([0-9]{6})", span.split()[0])
+	if is_date:
+		date = span.split()[0]
+		yyyy = "20" + date[:2]
+		mm = date[2:4]
+		dd = date[4:]
+		concept = "date-entity_" + yyyy + "_" + mm + "_" + dd
+		return concept
+	
+	stemmer=PorterStemmer()
+	span_stem = stemmer.stem(span)
+	wordnet_lemmatizer = WordNetLemmatizer()
+	span_lemma =  wordnet_lemmatizer.lemmatize(span.lower())
+	if pos[0] == "V":
+		return str(span_lemma)+"-01"
+	
+	return str(span_lemma)
+
 def create_span_concept_data(sentence, span_concept, pos_line, ner_line, all_concepts):
 	span_concept_data = []
 	words = sentence.split()
@@ -48,10 +116,12 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line, all_con
 				concepts.append(concept_instance)
 				concept_short_names.append(concept_var_name)
 			concept = "_".join(concepts)
-			if concept not in all_concepts: #unknown concept, assign it index of UNK
-				concept_idx = all_concepts.index("UNK")
-			else:
-				concept_idx = all_concepts.index(concept) 
+			if concept not in all_concepts: #unknown concept, create concept using rules
+				#concept_idx = all_concepts.index("UNK")
+				concept = create_concept_for_unknown_span(" ".join(span).lower(), " ".join(pos), " ".join(ner_line.split()[int(span_start):int(span_end)]))
+				concept = concept.replace("/", "").replace("(", "").replace(")", "").strip()
+				all_concepts.append(concept)
+			concept_idx = all_concepts.index(concept) 
 			concept_short_name = "_".join(concept_short_names)
 			concept_nx_graph_root = nx.topological_sort(concept_nx_graph)[0]
 			span_concept_data.append([" ".join(span).lower(), " ".join(pos), concept, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root, concept_idx])
@@ -67,7 +137,7 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line, all_con
 			span_concept_data.append([words[i].lower(), pos, concept, "NULL", ner_line.split()[i], None, concept_idx])
 			i += 1
 		vw_idx += 1
-	return span_concept_data, concept_vw_idx_dict
+	return span_concept_data, concept_vw_idx_dict, all_concepts
 
 visited_nodes = []
 
@@ -193,12 +263,46 @@ def get_span_concept(alignment, root, amr_nx_graph, sentence):
 				concept_nx_graph.add_edge(nodes[j], nodes[i], amr_nx_graph.get_edge_data(nodes[j], nodes[i]))
 	return (span_start, [span_end, span, concept_nx_graph])	
 
+def write_updated_span_concept_dict(span_concept_dict, train_span_concept_dict_filename):
+	merged_span_concept_dict = {}
+	for span, concepts in span_concept_dict.iteritems():
+		span_tag = span.replace(" ", "_").replace("\'", "")
+		merged_span_concept_dict[span_tag] = concepts	
+
+	train_span_concept_dict_file = open(train_span_concept_dict_filename, 'r')
+
+	for line in train_span_concept_dict_file.readlines():
+		parts = line.split()
+		span_tag = parts[0]
+		for part in parts[1:]:
+			concept_idx, count = part.split(':')
+			concept_idx = int(concept_idx)
+			count = int(count)
+			if span_tag not in merged_span_concept_dict.keys():
+				merged_span_concept_dict[span_tag] = {}
+			if concept_idx not in merged_span_concept_dict[span_tag].keys():
+				merged_span_concept_dict[span_tag][concept_idx] = 0
+			merged_span_concept_dict[span_tag][concept_idx] += count
+
+	#Sort the concepts for each span by their frequency
+	for span_tag, concepts in merged_span_concept_dict.iteritems():
+		span_concept_dict[span_tag] = OrderedDict(sorted(concepts.items(), key=lambda concepts: concepts[1], reverse=True))
+
+	output_dict_file = open(train_span_concept_dict_filename, 'w')
+
+	for span_tag, concepts in merged_span_concept_dict.iteritems():
+		line = span_tag + " "
+		for (concept_idx, count) in concepts.iteritems():
+			line += str(concept_idx) + ":" + str(count) + " "
+		output_dict_file.write(line+"\n")
+	
 def create_dataset(amr_nx_graphs, amr_aggregated_metadata, all_concepts):
 	for value in amr_nx_graphs:
 		[root, amr_nx_graph, sentence, alignments, id] = value
 		get_missing_alignment_data(root, amr_nx_graph, alignments, sentence)
 
 	span_concept_dataset = {}
+	span_concept_dict = {}
 	concept_vw_idx_dict_dataset = {}
 	for value in amr_nx_graphs:
 		span_concept = {}
@@ -207,10 +311,19 @@ def create_dataset(amr_nx_graphs, amr_aggregated_metadata, all_concepts):
 		for alignment in alignments.split():
 			span, concept = get_span_concept(alignment, root, amr_nx_graph, sentence)
 			span_concept[span] = concept
-		span_concept_data, concept_vw_idx_dict = create_span_concept_data(sentence, span_concept, amr_aggregated_metadata[id][1], amr_aggregated_metadata[id][2], all_concepts)
+		span_concept_data, concept_vw_idx_dict, all_concepts = create_span_concept_data(sentence, span_concept, amr_aggregated_metadata[id][1], amr_aggregated_metadata[id][2], all_concepts)
 		span_concept_dataset[id] = span_concept_data
 		concept_vw_idx_dict_dataset[id] = concept_vw_idx_dict
-	return span_concept_dataset, concept_vw_idx_dict_dataset
+		for [span, pos, concept, name, ner, nx_root, concept_idx] in span_concept_data:
+			span = span.replace(" ", "_")
+			if span_concept_dict.has_key(span):
+				if span_concept_dict[span].has_key(concept_idx):
+					span_concept_dict[span][concept_idx] += 1
+				else:
+					span_concept_dict[span][concept_idx] = 1
+			else:
+				span_concept_dict[span] = {concept_idx:1}
+	return span_concept_dataset, span_concept_dict, concept_vw_idx_dict_dataset, all_concepts
 
 def print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dataset, all_relations, output_vw_file):
 	for value in amr_nx_graphs:
@@ -257,13 +370,16 @@ def print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dat
 
 def main(argv):
 	if len(argv) < 2:
-		print "usage: python amr_nx_to_vw_for_test.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <concepts.p> <relations.p> <output_file.vw>"
+		print "usage: python amr_nx_to_vw_for_test.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <concepts.p> <relations.p> <span_concept_dict> <vnpb_words_concepts_dict.p> <output_file.vw>"
 		return
 	amr_nx_graphs_p = argv[0]
 	amr_aggregated_metadata_p = argv[1]
 	all_concepts = pickle.load(open(argv[2], 'rb'))
 	all_relations = pickle.load(open(argv[3], 'rb'))
-	output_vw_file = open(argv[4], 'w')
+	train_span_concept_dict_filename = argv[4] 
+	global vnpb_words_concepts_dict
+	vnpb_words_concepts_dict = pickle.load(open(argv[5], "rb"))
+	output_vw_file = open(argv[6], 'w')
 	
 	#Format of amr_nx_graphs
 	#amr_nx_graphs = {id : [root, amr_nx_graph, sentence, alignment]}
@@ -273,8 +389,10 @@ def main(argv):
 	#amr_aggregated_metadata = {id : [sentence, pos, ner]}
 	amr_aggregated_metadata = pickle.load(open(amr_aggregated_metadata_p, "rb"))
 
-	span_concept_dataset, concept_vw_idx_dict_dataset = create_dataset(amr_nx_graphs, amr_aggregated_metadata, all_concepts)
+	span_concept_dataset, span_concept_dict, concept_vw_idx_dict_dataset, all_concepts = create_dataset(amr_nx_graphs, amr_aggregated_metadata, all_concepts)
+	write_updated_span_concept_dict(span_concept_dict, train_span_concept_dict_filename)
 	print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dataset, all_relations, output_vw_file)
+	pickle.dump(all_concepts, open(argv[2], 'wb'))
 	
 if __name__ == "__main__":
 	main(sys.argv[1:])

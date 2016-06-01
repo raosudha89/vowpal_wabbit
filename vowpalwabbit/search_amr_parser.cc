@@ -543,12 +543,14 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   size_t size = stack.size();
   size_t last = (size==0) ? 0 : stack.last();
 
+  /*
   if (size >=2 && is_valid(SWAP_REDUCE_LEFT, valid_actions) && contains_gh(gold_heads[stack[size-2]], idx))
   { gold_actions.push_back(SWAP_REDUCE_LEFT);
     cdbg << "RET SRL" << endl;
     return;
   }
-
+  */
+  
   if (is_valid(REDUCE_LEFT,valid_actions) && contains_gh(gold_heads[last], idx))
   { gold_actions.push_back(REDUCE_LEFT);
     cdbg << "RET RL" << endl;
@@ -586,9 +588,9 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
         action_loss[SHIFT] += 1; // Edges to and from idx to anything in stack before size-2 is lost
   }
   if(size>0 && contains_gh(gold_heads[last], idx))
-    action_loss[SHIFT] += 1; //we can't do REDUCE_RIGHT anymore
+    action_loss[SHIFT] += 1; //we can't do REDUCE_LEFT anymore
   if(size>=2 && contains_gh(gold_heads[stack[size-2]], idx))
-    action_loss[SHIFT] += 1; //we can't do SWAP_REDUCE_RIGHT anymore
+    action_loss[SHIFT] += 1; //we can't do SWAP_REDUCE_LEFT anymore
 
   //Losses for REDUCE_LEFT action
 
@@ -598,14 +600,14 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   if(size>0)
   { //Edge to and from last to anything in buffer is lost
     for(size_t i = idx+1; i<=n; i++)
-      if(contains_gh(gold_heads[i], last) || (contains_gh(gold_heads[last], i) && gold_heads[last].size() == 1))
+      if(contains_gh(gold_heads[i], last) || (contains_gh(gold_heads[last], i)))
         action_loss[REDUCE_LEFT] +=1;
     if(idx <=n && contains_gh(gold_heads[idx], last))
       action_loss[REDUCE_LEFT] +=1;
   }
-  if(size>=2 && contains_gh(gold_heads[last], stack[size-2]) && gold_heads[last].size() == 1) //i.e. we can't do REDUCE_RIGHT anymore
+  if(size>=2 && contains_gh(gold_heads[last], stack[size-2])) //i.e. we can't do REDUCE_RIGHT anymore
     action_loss[REDUCE_LEFT] += 1;
-  if(size>=3 && contains_gh(gold_heads[last], stack[size-3]) && gold_heads[last].size() == 1) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
+  if(size>=3 && contains_gh(gold_heads[last], stack[size-3])) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
     action_loss[REDUCE_LEFT] += 1;
 
   //Losses for REDUCE_RIGHT action
@@ -613,39 +615,44 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   if(size>1 && !contains_gh(gold_heads[last], stack[size-2])) //If no such edge exists then add loss
     action_loss[REDUCE_RIGHT] +=1;
 
-  if(size>0 && gold_heads[last][0] >=idx && gold_heads[last].size() == 1) // we assume here that every node has only one head. Hallucinated nodes will take care of co-ref
-    action_loss[REDUCE_RIGHT] +=1; //Any heads to last from buffer are lost
-  if(size>=3 && contains_gh(gold_heads[last], stack[size-3]) && gold_heads[last].size() == 1)
-    action_loss[REDUCE_RIGHT] +=1;
   if(size>0)
-  {
+  { //Edge to and from last to anything in buffer is lost
     for(size_t i = idx; i<=n; i++)
-      if(contains_gh(gold_heads[i], last))
-        action_loss[REDUCE_RIGHT] +=1; //Any dependents of last in buffer are lost
+      if(contains_gh(gold_heads[i], last) || (contains_gh(gold_heads[last], i)))
+        action_loss[REDUCE_RIGHT] +=1;
   }
+
+  if(size>=2 && contains_gh(gold_heads[last], idx)) //i.e. we can't do REDUCE_LEFT anymore
+    action_loss[REDUCE_RIGHT] += 1;
+  if(size>=3 && contains_gh(gold_heads[last], stack[size-3])) //i.e. we can't do SWAP_REDUCE_RIGHT anymore
+    action_loss[REDUCE_RIGHT] += 1;
+
 
   //Losses for SWAP_REDUCE_LEFT action
 
-  if(size>1 && !contains_gh(gold_heads[stack[size-2]], idx)) //If no such edge exists then add loss
+  if(size>=2 && !contains_gh(gold_heads[stack[size-2]], idx)) //If no such edge exists then add loss
    action_loss[SWAP_REDUCE_LEFT] +=1;
 
+  if(size>=2)
+  { //Edge to and from second_last to anything in buffer is lost
+    size_t second_last = stack[size-2];
+    for(size_t i = idx; i<=n; i++)
+      if(contains_gh(gold_heads[i], second_last) || (contains_gh(gold_heads[second_last], i)))
+        action_loss[SWAP_REDUCE_LEFT] +=1;
+  }
+
+  if(size>=2 && contains_gh(gold_heads[last], stack[size-2])) //i.e. we can't do REDUCE_RIGHT anymore
+    action_loss[SWAP_REDUCE_LEFT] += 1;
+  
+  /*
   if(size >= 2)
   { if(size>=3 && contains_gh(gold_heads[stack[size-2]], stack[size-3]))
       action_loss[SWAP_REDUCE_LEFT] +=1; //we can't do REDUCE_RIGHT when second_last comes on top of stack anymore
     if(size>=4 && contains_gh(gold_heads[stack[size-2]], stack[size-4]))
       action_loss[SWAP_REDUCE_LEFT] +=1; //we can't do SWAP_REDUCE_RIGHT when second_last comes on top of stack anymore
-    //Edges to and from second_last to anything in buffer are lost
-    for(size_t i=idx+1; i<=n; i++)
-      if( (contains_gh(gold_heads[stack[size-2]], i) && gold_heads[stack[size-2]].size() == 1) || contains_gh(gold_heads[i], stack[size-2]))
-        action_loss[SWAP_REDUCE_LEFT] +=1;
-    if(idx <=n && contains_gh(gold_heads[idx], stack[size-2]))
-      action_loss[SWAP_REDUCE_LEFT] +=1; //if idx was child of second_last, we have lost it
-    if(contains_gh(gold_heads[stack[size-1]], stack[size-2]))
-      action_loss[SWAP_REDUCE_LEFT] +=1; //if last was child of second_last, we have lost it
-    //if(contains_gh(gold_heads[stack[size-1]], idx))
-    //  action_loss[SWAP_REDUCE_LEFT] +=1;
 
   }
+  */
 
   //Losses for SWAP_REDUCE_RIGHT action
 
@@ -653,12 +660,15 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     action_loss[SWAP_REDUCE_RIGHT] +=1;
 
   if(size>0)
-  { for(size_t i=idx; i<=n; i++)
-      if( (contains_gh(gold_heads[last], i) && gold_heads[last].size() == 1) || contains_gh(gold_heads[i], last))
+  { //Edge to and from last to anything in buffer is lost
+    for(size_t i = idx; i<=n; i++)
+      if(contains_gh(gold_heads[i], last) || (contains_gh(gold_heads[last], i)))
         action_loss[SWAP_REDUCE_RIGHT] +=1;
-    if(size>=2 && contains_gh(gold_heads[last], stack[size-2]))
-      action_loss[SWAP_REDUCE_RIGHT] +=1;
   }
+
+  if(size>=2 && contains_gh(gold_heads[last], stack[size-2])) //i.e. we can't do REDUCE_RIGHT anymore
+    action_loss[SWAP_REDUCE_RIGHT] += 1;
+
 
   // return the best actions
   size_t best_action = 1;
