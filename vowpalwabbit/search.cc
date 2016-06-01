@@ -32,7 +32,7 @@ namespace MC = MULTICLASS;
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 
-#define DEBUG_REF true
+#define DEBUG_REF false
 
 namespace Search
 {
@@ -960,7 +960,7 @@ action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* o
   }
 
   if (a == (action)-1)
-  { if ((priv.perturb_oracle > 0.) && (priv.state == INIT_TRAIN) && (frand48() < priv.perturb_oracle))
+  { if ((priv.perturb_oracle > 0.) && (priv.state == INIT_TRAIN || priv.state == LEARN) && (frand48() < priv.perturb_oracle))
       oracle_actions_cnt = 0;
     a = ( oracle_actions_cnt > 0) ?  oracle_actions[random(oracle_actions_cnt )] :
         (allowed_actions_cnt > 0) ? allowed_actions[random(allowed_actions_cnt)] :
@@ -1657,7 +1657,9 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
     }
 
     if (priv.state == INIT_TRAIN)
-      priv.train_trajectory.push_back( scored_action(a, a_cost) ); // note the action for future reference
+    { priv.train_trajectory.push_back( scored_action(a, a_cost) ); // note the action for future reference
+      cdbg << "assign train_trajectory[" << priv.train_trajectory.size()-1 << "] = " << priv.train_trajectory[priv.train_trajectory.size()-1] << endl;
+    }
 
     if ((priv.state == LEARN) && priv.record_learn_actions)
       priv.learn_trajectory.push_back( a );
@@ -1850,7 +1852,7 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
   // SPEEDUP: if the oracle was never called, we can skip this!
 
   // do a pass over the data allowing oracle
-  cerr << "======================================== INIT TRAIN (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
+  cdbg << "======================================== INIT TRAIN (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
   //cerr << "training" << endl;
 
   clear_cache_hash_map(priv);
@@ -1875,7 +1877,7 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
   }
 
   // otherwise, we have some learn'in to do!
-  cerr << "======================================== LEARN (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
+  cdbg << "======================================== LEARN (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
   priv.T = priv.metatask ? priv.meta_t : priv.t;
   get_training_timesteps(priv, priv.timesteps);
   cdbg << "train_trajectory.size() = " << priv.train_trajectory.size() << ":\t";
@@ -1946,18 +1948,25 @@ inline bool cmp_float(const float a, const float b) { return a < b; }
   
 void debug_oracle(vw&all, search&sch)
 { search_private& priv = *sch.priv;
-
+  uint32_t seed = 90210;
   cout << "running reference on example " << priv.ec_seq[0]->example_t << endl;
   reset_search_structure(priv);
+  priv.train_trajectory.erase();  // this is where we'll store the training sequence
   priv.state = INIT_TRAIN;
   priv.rollin_method = ORACLE;
   priv.rollout_method = ORACLE;
   priv.should_produce_string = true;
   priv.pred_string->str("");
+  msrand48(seed);
   run_task(sch, priv.ec_seq);
   float ref_loss = priv.test_loss;
+  char pred_label[10000];
+  memset(pred_label, 0, 10000*sizeof(char));
+  to_short_string(priv.pred_string->str(), 9999, pred_label);
+  if (priv.pred_string->str().length() < 10000)
+    pred_label[priv.pred_string->str().length()] = 0;
   cout << "     loss: " << ref_loss << endl;
-  cout << "   output: " << priv.pred_string->str() << endl;
+  cout << "   output: " << pred_label << endl;
   cout << "  actions:";  for (scored_action& sa : priv.train_trajectory) cout << ' ' << sa.a;  cout << endl;
   v_array<float> osd_loss = v_init<float>();
   bool any_better = false;
@@ -1970,6 +1979,8 @@ void debug_oracle(vw&all, search&sch)
       priv.record_learn_actions = true;
       priv.state = LEARN;
       priv.learn_t = t0;
+      msrand48(seed);
+      cdbg << "  actions:";  for (scored_action& sa : priv.train_trajectory) cdbg << ' ' << sa.a; cdbg << endl;
       run_task(sch, priv.ec_seq);
       osd_loss.push_back( priv.learn_loss );
       if (priv.learn_loss < ref_loss)
@@ -2546,6 +2557,7 @@ base_learner* setup(vw&all)
   ("search_force_oracle",                           "always run oracle (useful for debugging oracle); use with -t for instance")
   ("search_debug_oracle",                           "run a series of debugging tests on the reference policy")
   ("search_wide_output",                            "print wider-than-usual output (to fit structured examples)")
+      ("search_constant_beta", "keep beta fixed, not 1-(1-alpha)^2")
   ;
   add_options(all);
   po::variables_map& vm = all.vm;
@@ -2593,6 +2605,7 @@ base_learner* setup(vw&all)
 
   if (vm.count("search_alpha"))                   priv.alpha                = vm["search_alpha"            ].as<float>();
   if (vm.count("search_beta"))                    priv.beta                 = vm["search_beta"             ].as<float>();
+  if (vm.count("search_constant_beta"))           priv.adaptive_beta        = false;
 
   if (vm.count("search_subsample_time"))          priv.subsample_timesteps  = vm["search_subsample_time"].as<float>();
   if (vm.count("search_no_caching"))              priv.global_no_caching = true;
@@ -2778,7 +2791,7 @@ base_learner* setup(vw&all)
   }
 
   if (vm.count("search_override_hook") > 0)
-  { cerr << "overriding task " << task_string << " with hook!" << endl;
+  { std::cerr << "overriding task " << task_string << " with hook!" << endl;
     // TODO remove
   }
   
@@ -2847,6 +2860,8 @@ float action_cost_loss(action a, const action* act, const float* costs, size_t s
 // the interface:
 bool search::is_ldf() { return priv->is_ldf; }
 
+bool my_assert(bool arg) { assert(arg); return true; }
+  
 action search::predict(example& ec, ptag mytag, const action* oracle_actions, size_t oracle_actions_cnt, const ptag* condition_on, const char* condition_on_names, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, size_t learner_id, float weight, uint32_t max_action_allowed)
 { float a_cost = 0.;
   //if (priv->multitask != nullptr)
@@ -2867,12 +2882,15 @@ action search::predict(example& ec, ptag mytag, const action* oracle_actions, si
     } else
       push_at(priv->ptag_to_action, action_repr(a, (features*)nullptr), mytag);
     cdbg << "push_at " << mytag << " <- " << a << endl;
-  }
+  } else
+    cdbg << "warning: no tag to push_at!" << endl;
+  
   if (priv->auto_hamming_loss)
     loss( priv->use_action_costs
           ? action_cost_loss(a, allowed_actions, allowed_actions_cost, allowed_actions_cnt)
           : action_hamming_loss(a, oracle_actions, oracle_actions_cnt));
   cdbg << "predict returning " << a << endl;
+  cdbg << "checking if it's valid: " << my_assert((allowed_actions == nullptr) || (allowed_actions_cnt == 0) || array_contains<action>(a, allowed_actions, allowed_actions_cnt)) << endl;
   return a;
 }
 
@@ -2892,9 +2910,10 @@ action search::predictLDF(example* ecs, size_t ec_cnt, ptag mytag, const action*
         delete priv->ptag_to_action[mytag].repr;
       }
     } // TODO: passthrough representation
-    cdbg << "push_at " << mytag << " <- " << a << endl;
+    cdbg << "push_at (LDF) " << mytag << " <- " << a << endl;
     push_at(priv->ptag_to_action, action_repr(ecs[a].l.cs.costs[0].class_index, &(priv->last_action_repr)), mytag);
-  }
+  } else
+    cdbg << "warning: no tag to push_at (LDF)!" << endl;
   if (priv->auto_hamming_loss)
     loss(action_hamming_loss(a, oracle_actions, oracle_actions_cnt)); // TODO: action costs
   cdbg << "predictLDF returning " << a << endl;

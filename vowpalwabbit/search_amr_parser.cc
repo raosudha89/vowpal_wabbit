@@ -187,6 +187,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = new task_data();
   data->action_loss.resize(NUM_ACTIONS+1);
+  if (data->action_loss.size() == 0) data->action_loss.push_back(0);
   data->action_loss.end() = data->action_loss.begin() + NUM_ACTIONS + 1;
   data->ex = NULL;
   sch.set_task_data<task_data>(data);
@@ -675,7 +676,8 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   { gold_actions.erase();
     gold_actions.push_back((uint32_t)SHIFT);
   }
-  if (sch.at_learning_point()) cerr << endl << "AL = " << action_loss;
+  //if (sch.at_learning_point())
+  //  cerr << endl << "AL = " << action_loss;
 }
 
 void get_word_possible_concepts(task_data& data, v_array<pair<action,float>>& possible_concepts, v_array<char>& word)
@@ -983,7 +985,7 @@ void run(Search::search& sch, vector<example*>& ec)
       cdbg << "t_id " << t_id << endl;
       */
       // for later hallucinations, mark a memory of the features at this concept
-      LabelDict::set_label_features(concept_to_features, idx, *(data->ex));  // TODO: is idx the right place? -- Yes
+          //LabelDict::set_label_features(concept_to_features, idx, *(data->ex));  // TODO: is idx the right place? -- Yes
     }
     else if (a_id == REDUCE_LEFT)
     { uint32_t gold_label = 0;
