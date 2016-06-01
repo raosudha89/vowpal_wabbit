@@ -960,7 +960,7 @@ action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* o
   }
 
   if (a == (action)-1)
-  { if ((priv.perturb_oracle > 0.) && (priv.state == INIT_TRAIN || priv.state == LEARN) && (frand48() < priv.perturb_oracle))
+  { if ((priv.perturb_oracle > 0.) && (priv.state == INIT_TRAIN /* || priv.state == LEARN */) && (frand48() < priv.perturb_oracle)) // TODO separate this into two options
       oracle_actions_cnt = 0;
     a = ( oracle_actions_cnt > 0) ?  oracle_actions[random(oracle_actions_cnt )] :
         (allowed_actions_cnt > 0) ? allowed_actions[random(allowed_actions_cnt)] :
@@ -1959,7 +1959,7 @@ void debug_oracle(vw&all, search&sch)
   priv.pred_string->str("");
   msrand48(seed);
   run_task(sch, priv.ec_seq);
-  float ref_loss = priv.test_loss;
+  float ref_loss = priv.train_loss;
   char pred_label[10000];
   memset(pred_label, 0, 10000*sizeof(char));
   to_short_string(priv.pred_string->str(), 9999, pred_label);
