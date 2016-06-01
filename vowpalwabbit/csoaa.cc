@@ -398,17 +398,17 @@ void do_actual_learning_oaa(ldf& data, base_learner& base, size_t start_K)
     ec->example_t = data.csoaa_example_t;
 
     simple_label.initial = 0.;
-    float old_weight = ec->weight;
+    float old_weight = 1.; // ec->weight;
     if (!data.treat_as_classifier)   // treat like regression
       simple_label.label = costs[0].x;
     else     // treat like classification
     { if (costs[0].x <= min_cost)
       { simple_label.label = -1.;
-        ec->weight = old_weight * (max_cost - min_cost);
+        ec->weight = max_cost - min_cost;
       }
       else
       { simple_label.label = 1.;
-        ec->weight = old_weight * (costs[0].x - min_cost);
+        ec->weight = costs[0].x - min_cost;
       }
     }
     ec->l.simple = simple_label;
