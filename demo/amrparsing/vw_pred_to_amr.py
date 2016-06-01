@@ -90,11 +90,11 @@ def get_amr_string(root, amr_nx_graph, tab_levels=1):
 		size = len(shortname_dict.keys())
 		shortname_dict[root] = "c"+str(size)
 		if amr_nx_graph.node[root]['postprocess'] == True: #postprocessed node so don't add shortname
-			amr_string = "{0} \n".format(amr_nx_graph.node[root]['instance'])
+			amr_string = "{0} \n".format(amr_nx_graph.node[root]['instance'].replace("/", ""))
 		else:
-			amr_string = "({0} / {1}\n".format(shortname_dict[root], amr_nx_graph.node[root]['instance']) + amr_string + ")"
+			amr_string = "({0} / {1}\n".format(shortname_dict[root], amr_nx_graph.node[root]['instance'].replace("/", "")) + amr_string + ")"
 	else:
-		amr_string = "{0}".format(amr_nx_graph.node[root]['instance'])
+		amr_string = "{0}".format(amr_nx_graph.node[root]['instance'].replace("/", ""))
 	return amr_string	
 
 def print_nx_graph(nx_graph, amr_roots, output_amr_file):
