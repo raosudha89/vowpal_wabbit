@@ -27,14 +27,15 @@ struct csoaa
 template<bool is_learn>
 inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
                        uint32_t& prediction, float& score, float& partial_prediction,
-                       bool classificationesque, polyprediction* pred, uint32_t num_classes)
+                       bool classificationesque, polyprediction* pred, uint32_t num_classes, float max_cost)
 { if (is_learn)
   { if (! classificationesque)
     { ec.l.simple.label = cost;
       ec.weight = (cost == FLT_MAX) ? 0.f : 1.f;
     } else
     { ec.l.simple.label = (cost <= 0.) ? -1. : 1.;
-      ec.weight = (cost == FLT_MAX) ? 0. : (cost <= 0.) ? 1. : cost;
+      //ec.weight = 1.; // (cost == FLT_MAX) ? 0. : (cost <= 0.) ? 1. : cost;
+      ec.weight = (cost <= 0) ? max_cost : cost;
     }
     if ((pred == nullptr) || (i < 1) || (i > num_classes) || (cost == FLT_MAX))
       base.learn(ec, i-1);
@@ -58,7 +59,7 @@ inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
   if (ec.passthrough) add_passthrough_feature(ec, i, ec.partial_prediction);
 }
 
-#define DO_MULTIPREDICT false
+#define DO_MULTIPREDICT true
 
 bool maybe_do_multipredict(csoaa& c, base_learner& base, example& ec, COST_SENSITIVE::label& ld)
 { if (! DO_MULTIPREDICT) return false;
@@ -93,8 +94,12 @@ void predict_or_learn(csoaa& c, base_learner& base, example& ec)
   //cerr << "csoaa::predict_or_learn ld.costs.size()=" << ld.costs.size() << endl;
   if (ld.costs.size() > 0)
   { bool predicted = maybe_do_multipredict(c, base, ec, ld);
+    float max_cost = 0.;
+    //float sum_cost = 0.;
+    //float num_zero = 0.;
+    for (auto& cl : ld.costs) max_cost = max(max_cost, cl.x); // sum_cost += cl.x; if (cl.x <= 0.) num_zero += 1.; }
     for (auto& cl : ld.costs)
-      inner_loop<is_learn>(base, ec, cl.class_index, cl.x, prediction, score, cl.partial_prediction, c.classificationesque, predicted ? c.pred : nullptr, c.num_classes);
+      inner_loop<is_learn>(base, ec, cl.class_index, cl.x, prediction, score, cl.partial_prediction, c.classificationesque, predicted ? c.pred : nullptr, c.num_classes, max_cost);
     ec.partial_prediction = score;
   }
   else if (DO_MULTIPREDICT && !is_learn)
@@ -111,7 +116,7 @@ void predict_or_learn(csoaa& c, base_learner& base, example& ec)
   else
   { float temp;
     for (uint32_t i = 1; i <= c.num_classes; i++)
-      inner_loop<false>(base, ec, i, FLT_MAX, prediction, score, temp, c.classificationesque, nullptr, c.num_classes);
+      inner_loop<false>(base, ec, i, FLT_MAX, prediction, score, temp, c.classificationesque, nullptr, c.num_classes, 0.);
   }
   if (ec.passthrough)
   { uint64_t second_best = 0;
@@ -393,17 +398,17 @@ void do_actual_learning_oaa(ldf& data, base_learner& base, size_t start_K)
     ec->example_t = data.csoaa_example_t;
 
     simple_label.initial = 0.;
-    float old_weight = ec->weight;
+    float old_weight = 1.; // ec->weight;
     if (!data.treat_as_classifier)   // treat like regression
       simple_label.label = costs[0].x;
     else     // treat like classification
     { if (costs[0].x <= min_cost)
       { simple_label.label = -1.;
-        ec->weight = old_weight * (max_cost - min_cost);
+        ec->weight = max_cost - min_cost;
       }
       else
       { simple_label.label = 1.;
-        ec->weight = old_weight * (costs[0].x - min_cost);
+        ec->weight = costs[0].x - min_cost;
       }
     }
     ec->l.simple = simple_label;

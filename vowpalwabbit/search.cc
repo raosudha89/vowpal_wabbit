@@ -479,7 +479,7 @@ void print_update(search_private& priv)
 
   size_t label_width = priv.wide_output_format ? 45 : 20;
   
-  char true_label[label_width + 1];
+  char true_label[label_width + 11];
   char pred_label[label_width + 1];
   to_short_string(priv.truth_string->str(), label_width, true_label);
   to_short_string(priv.pred_string->str() , label_width, pred_label);
@@ -960,7 +960,7 @@ action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* o
   }
 
   if (a == (action)-1)
-  { if ((priv.perturb_oracle > 0.) && (priv.state == INIT_TRAIN || priv.state == LEARN) && (frand48() < priv.perturb_oracle))
+  { if ((priv.perturb_oracle > 0.) && (priv.state == INIT_TRAIN /* || priv.state == LEARN */) && (frand48() < priv.perturb_oracle)) // TODO separate this into two options
       oracle_actions_cnt = 0;
     a = ( oracle_actions_cnt > 0) ?  oracle_actions[random(oracle_actions_cnt )] :
         (allowed_actions_cnt > 0) ? allowed_actions[random(allowed_actions_cnt)] :
@@ -1713,9 +1713,16 @@ void get_training_timesteps(search_private& priv, v_array<size_t>& timesteps)
 
   // if there's active learning, we need to
   if (priv.subsample_timesteps <= -1)
-  { for (size_t i=0; i<priv.active_uncertainty.size(); i++)
+  { /*
+    for (size_t i=0; i<priv.active_uncertainty.size(); i++)
       if (frand48() > priv.active_uncertainty[i].first)
         timesteps.push_back(priv.active_uncertainty[i].second - 1);
+    */
+    std::sort(priv.active_uncertainty.begin(), priv.active_uncertainty.end(),
+              [](const pair<float,size_t> a, const pair<float,size_t> b) -> bool
+              { return a.first < b.first; });
+    for (size_t i=0; i<min(-priv.subsample_timesteps, priv.active_uncertainty.size()); i++)
+      timesteps.push_back(priv.active_uncertainty[i].second- 1);
     /*
     float k = (float)priv.total_examples_generated;
     priv.ec_seq[t]->revert_weight = priv.all->loss->getRevertingWeight(priv.all->sd, priv.ec_seq[t].pred.scalar, priv.all->eta / powf(k, priv.all->power_t));
@@ -1959,7 +1966,7 @@ void debug_oracle(vw&all, search&sch)
   priv.pred_string->str("");
   msrand48(seed);
   run_task(sch, priv.ec_seq);
-  float ref_loss = priv.test_loss;
+  float ref_loss = priv.train_loss;
   char pred_label[10000];
   memset(pred_label, 0, 10000*sizeof(char));
   to_short_string(priv.pred_string->str(), 9999, pred_label);
@@ -2605,7 +2612,6 @@ base_learner* setup(vw&all)
 
   if (vm.count("search_alpha"))                   priv.alpha                = vm["search_alpha"            ].as<float>();
   if (vm.count("search_beta"))                    priv.beta                 = vm["search_beta"             ].as<float>();
-  if (vm.count("search_constant_beta"))           priv.adaptive_beta        = false;
 
   if (vm.count("search_subsample_time"))          priv.subsample_timesteps  = vm["search_subsample_time"].as<float>();
   if (vm.count("search_no_caching"))              priv.global_no_caching = true;
@@ -2616,6 +2622,7 @@ base_learner* setup(vw&all)
 
   priv.A = vm["search"].as<size_t>();
 
+  
   string neighbor_features_string;
   check_option<string>(neighbor_features_string, all, vm, "search_neighbor_features", false, string_equal,
                        "warning: you specified a different feature structure with --search_neighbor_features than the one loaded from predictor. using loaded value of: ", "");
@@ -2657,6 +2664,8 @@ base_learner* setup(vw&all)
   check_option<size_t>(priv.history_length, all, vm, "search_history_length", false, size_equal,
                        "warning: you specified a different history length through --search_history_length than the one loaded from predictor. using loaded value of: ", "");
 
+  if (vm.count("search_constant_beta"))           priv.adaptive_beta        = false;
+  
   //check if the base learner is contextual bandit, in which case, we dont rollout all actions.
   priv.allowed_actions_cache = &calloc_or_throw<polylabel>();
   if (vm.count("cb"))

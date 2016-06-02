@@ -50,6 +50,7 @@ struct task_data
   bool always_include_null_concept;
   bool use_gold_concepts;
   size_t max_hallucinate_in_a_row;
+  bool disallow_swap;
   uint32_t amr_num_label;
   uint32_t amr_num_concept;
   v_array<uint32_t> valid_actions, action_loss, stack, temp, valid_action_temp, gold_concepts, concepts;
@@ -201,6 +202,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   ("amr_no_auto_null_concept", "by default all words can yield a null concept; turn on this flag to disable this")
   ("amr_num_label", po::value<uint32_t>(&(data->amr_num_label))->default_value(5), "Number of arc labels")
   ("amr_max_hallucinate", po::value<size_t>(&(data->max_hallucinate_in_a_row))->default_value(2), "Maximum number of hallucinations in a row to avoid infinite loops (def: 2)")
+  ("amr_disallow_swap", "Turn off the swap actions")
   ("use_gold_concepts", po::value<bool>(&(data->use_gold_concepts))->default_value(false), "turn on this flag to use gold concepts at test time")
   ("amr_dictionary", po::value<string>(), "file to read word-to-concept dictionary from")
   ("amr_dictionary_max_competitors", po::value<size_t>(&max_competitors)->default_value(INT_MAX), "restrict concept sets to at most this many items (def: infinity)")
@@ -221,6 +223,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   for(size_t i=1; i<14; i++)
     data->ex->indices.push_back((unsigned char)i+'A');
   data->ex->indices.push_back(constant_namespace);
+  data->disallow_swap = vm.count("amr_disallow_swap") > 0;
 
   size_t max_confusion_set = read_word_to_concept(vm["amr_dictionary"].as<string>(), data->word_to_concept, data->amr_num_concept, max_competitors, min_count);
 
@@ -506,7 +509,7 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
   data->ex->total_sum_feat_sq = (float) count + new_weight;
 }
 
-void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t n, uint64_t stack_depth, uint64_t state, v_array<uint32_t> &concepts, bool hallucinate_okay, v_array<v_array<uint32_t>> &tags)
+void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t n, uint64_t stack_depth, uint64_t state, v_array<uint32_t> &concepts, bool hallucinate_okay, v_array<v_array<uint32_t>> &tags, bool disallow_swap)
 { valid_action.erase();
   if(idx<=n && concepts[idx] == 0)
     valid_action.push_back( MAKE_CONCEPT );
@@ -514,10 +517,12 @@ void get_valid_actions(v_array<uint32_t> & valid_action, uint64_t idx, uint64_t 
     valid_action.push_back( REDUCE_RIGHT );
   if(stack_depth >=1 && state!=0 && idx<=n && concepts[idx] != 0)
     valid_action.push_back( REDUCE_LEFT );
-  if(stack_depth >=3)
-    valid_action.push_back( SWAP_REDUCE_RIGHT );
-  if(stack_depth >=2 && state!=0 && idx<=n && concepts[idx] != 0)
-    valid_action.push_back( SWAP_REDUCE_LEFT);
+  if (! disallow_swap)
+  { if(stack_depth >=3)
+      valid_action.push_back( SWAP_REDUCE_RIGHT );
+    if(stack_depth >=2 && state!=0 && idx<=n && concepts[idx] != 0)
+      valid_action.push_back( SWAP_REDUCE_LEFT);
+  }
   if(stack_depth >=1 && state!=0 && hallucinate_okay)
     for (uint32_t i=1; i<idx; i++)
       if (tags[i].size() > 0)
@@ -857,7 +862,8 @@ float smatch_loss(Search::search& sch, uint64_t n)
   cdbg << "Correct " << correct << endl;
   cdbg << "NewEnd" << endl;
 
-
+  //return max(0., gold - correct + pred - correct);
+  
   float p = (pred > 0) ? correct/pred : 0;
   float r = (gold > 0) ? correct/gold : 0;
   float smatch = (p+r > 0) ? 1 -(2*p*r/(p+r)): 1;
@@ -922,7 +928,7 @@ void run(Search::search& sch, vector<example*>& ec)
       extracted_features = true;
     }
     bool hallucinate_okay = num_hallucinate_in_a_row < data->max_hallucinate_in_a_row;
-    get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last(), concepts, hallucinate_okay, tags);
+    get_valid_actions(valid_actions, idx, n, (uint64_t) stack.size(), stack.empty() ? 0 : stack.last(), concepts, hallucinate_okay, tags, data->disallow_swap);
 
     cdbg << "VALID ACTIONS " << valid_actions << endl;
     cdbg << "idx " << idx << endl;

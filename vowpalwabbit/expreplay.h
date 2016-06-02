@@ -21,8 +21,9 @@ void predict_or_learn(expreplay& er, LEARNER::base_learner& base, example& ec)
 { // regardless of what happens, we must predict
   base.predict(ec);
   // if we're not learning, that's all that has to happen
-  if (!is_learn || lp.get_weight(&ec.l) == 0.) return;
+  if (!is_learn) return; // || lp.get_weight(&ec.l) == 0.) return;
 
+  base.learn(ec);
   for (size_t replay=1; replay<er.replay_count; replay++)
   { size_t n = (size_t)(frand48() * (float)er.N);
     if (er.filled[n])
