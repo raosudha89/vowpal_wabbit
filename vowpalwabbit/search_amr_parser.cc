@@ -950,8 +950,8 @@ void run(Search::search& sch, vector<example*>& ec)
            .predict();
     
     if (sch.is_test() == true) //this is test time, so update action_confusion_matrix
-    { if (data->use_gold_concepts && contains(gold_actions, MAKE_CONCEPT))
-        a_id = MAKE_CONCEPT;
+    { //if (data->use_gold_concepts && contains(gold_actions, MAKE_CONCEPT))
+      //  a_id = MAKE_CONCEPT;
      
       //cerr << "GOLD ACTIONS " << gold_actions << endl;
       if (contains(gold_actions, a_id))
@@ -1002,8 +1002,8 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = sch.ldf_get_label(t_id);
       cdbg << ", label=" << t_id << endl;
 
-	  if (data->use_gold_concepts && sch.is_test())
-        t_id = gold_concepts[idx];
+	  //if (data->use_gold_concepts && sch.is_test())
+      //  t_id = gold_concepts[idx];
       /* original
       uint32_t gold_concept = gold_concepts[idx];
       t_id = P.set_tag((ptag) count)
