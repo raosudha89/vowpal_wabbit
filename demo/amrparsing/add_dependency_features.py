@@ -1,7 +1,8 @@
 import sys, re
 import networkx as nx
 
-dep_labels = 'vmod nmod pmod p sub dep obj root vc prd amod sbar'.split()
+#dep_labels = 'vmod nmod pmod p sub dep obj root vc prd amod sbar'.split()
+dep_labels = map(lambda i: hex(i)[2],range(16))
 
 def readNextDependencyParse(h):
     G = nx.DiGraph()
@@ -9,10 +10,16 @@ def readNextDependencyParse(h):
     n = 0
     while True:
         l = h.readline()
-        if l == '' or l[0] == ' ':
+        if l == '' or l[0] == ' ' or l.isspace():
             break
         n += 1
-        [parent,label] = map(int, l.split(':'))
+        a = l.strip().split(':')
+        assert(len(a) == 2)
+        [parent,label] = a
+        assert(parent.isdigit())
+        assert(label.isdigit())
+        parent = int(parent)
+        label = int(label)
         G.add_edge(n, parent, l=dep_labels[label-1], d='L' if parent < n else 'R')
         
     return G
@@ -42,29 +49,29 @@ def getNodeFeatures(G, sent, n):  # this is ONE-based; assume sent[0] = '*ROOT*'
     def add(k,v=1.): F[k] = F.get(k,0) + v
 
     # neighbor features
-    add('nsucc', len(G.successors(n)))
-    add('npred', len(G.predecessors(n)))
+    add('ns', len(G.successors(n)))
+    add('np', len(G.predecessors(n)))
     for m in G.successors_iter(n):
         e = G.edge[n][m]
-        add('succ-%s%s' % (e['l'], e['d']))
-        add('succ-%s%s-%s' % (e['l'], e['d'], sent[m]))
+        add('s-%s%s' % (e['l'], e['d']))
+        add('s-%s%s-%s' % (e['l'], e['d'], sent[m]))
     for m in G.predecessors_iter(n):
         e = G.edge[m][n]
-        add('pred-%s%s' % (e['l'], e['d']))
-        add('pred-%s%s-%s' % (e['l'], e['d'], sent[m]))
+        add('p-%s%s' % (e['l'], e['d']))
+        add('p-%s%s-%s' % (e['l'], e['d'], sent[m]))
 
     # path to root
     try:
         path = nx.shortest_path(G, source=n, target=0)
         L    = len(path)
-        cur  = 'path'
+        cur  = 'p_'
         for l in range(L-1):
             a,b = path[l], path[l+1]
             e   = G.edge[a][b]
-            cur += '_' + e['l']
+            cur += e['l']
             add(cur)
     except nx.exception.NetworkXNoPath:
-        add('path-none-to-root')
+        add('p_')
         pass
 
     return ' '.join(sorted([vwify(k,v) for k,v in F.iteritems() if abs(v) > 1e-6]))

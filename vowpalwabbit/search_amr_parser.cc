@@ -51,6 +51,7 @@ struct task_data
   bool use_gold_concepts;
   size_t max_hallucinate_in_a_row;
   bool disallow_swap;
+  bool reverse_sentence;
   uint32_t amr_num_label;
   uint32_t amr_num_concept;
   v_array<uint32_t> valid_actions, action_loss, stack, temp, valid_action_temp, gold_concepts, concepts;
@@ -198,15 +199,17 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   float  min_count = 0.;
 
   new_options(all, "AMR Parser Options")
-  ("amr_root_label", po::value<size_t>(&(data->amr_root_label))->default_value(1), "Ensure that there is only one root in each sentence")
-  ("amr_no_auto_null_concept", "by default all words can yield a null concept; turn on this flag to disable this")
-  ("amr_num_label", po::value<uint32_t>(&(data->amr_num_label))->default_value(5), "Number of arc labels")
-  ("amr_max_hallucinate", po::value<size_t>(&(data->max_hallucinate_in_a_row))->default_value(2), "Maximum number of hallucinations in a row to avoid infinite loops (def: 2)")
-  ("amr_disallow_swap", "Turn off the swap actions")
-  ("use_gold_concepts", po::value<bool>(&(data->use_gold_concepts))->default_value(false), "turn on this flag to use gold concepts at test time")
-  ("amr_dictionary", po::value<string>(), "file to read word-to-concept dictionary from")
-  ("amr_dictionary_max_competitors", po::value<size_t>(&max_competitors)->default_value(INT_MAX), "restrict concept sets to at most this many items (def: infinity)")
-  ("amr_dictionary_min_count", po::value<float>(&min_count)->default_value(0.), "ignore concepts with count/value less than this number (def: 0)");
+      ("amr_root_label", po::value<size_t>(&(data->amr_root_label))->default_value(1), "Ensure that there is only one root in each sentence")
+      ("amr_no_auto_null_concept", "by default all words can yield a null concept; turn on this flag to disable this")
+      ("amr_num_label", po::value<uint32_t>(&(data->amr_num_label))->default_value(5), "Number of arc labels")
+      ("amr_max_hallucinate", po::value<size_t>(&(data->max_hallucinate_in_a_row))->default_value(2), "Maximum number of hallucinations in a row to avoid infinite loops (def: 2)")
+      ("amr_disallow_swap", "Turn off the swap actions")
+      ("use_gold_concepts", po::value<bool>(&(data->use_gold_concepts))->default_value(false), "turn on this flag to use gold concepts at test time")
+      ("amr_dictionary", po::value<string>(), "file to read word-to-concept dictionary from")
+      ("amr_dictionary_max_competitors", po::value<size_t>(&max_competitors)->default_value(INT_MAX), "restrict concept sets to at most this many items (def: infinity)")
+      ("amr_dictionary_min_count", po::value<float>(&min_count)->default_value(0.), "ignore concepts with count/value less than this number (def: 0)")
+      ("amr_reverse_sentence", "parse the sentence backwards")
+      ;
   add_options(all);
 
   check_option<size_t>(data->amr_root_label, all, vm, "amr_root_label", false, size_equal,
@@ -233,6 +236,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   data->possible_concepts = v_init<v_array<pair<action,float>>>();
   for (size_t i=0; i<MAX_SENT_LEN; i++)
     data->possible_concepts.push_back(v_init<pair<action,float>>());
+  data->reverse_sentence = vm.count("amr_reverse_sentence") > 0;
 
   // features are:
   //    B - stack[-1]
@@ -275,7 +279,6 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   sch.set_options(AUTO_CONDITION_FEATURES | NO_CACHING | IS_MIXED_LDF);
 
   sch.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
-  cerr << "Initialize called " << endl; 
   //Action confusion matrix for debugging; row=gold_action col=predicted_action
   data->action_confusion_matrix.resize(NUM_ACTIONS);
   for (size_t i=0; i<NUM_ACTIONS; i++)
@@ -713,6 +716,25 @@ void get_word_possible_concepts(task_data& data, v_array<pair<action,float>>& po
     possible_concepts.push_back(make_pair(NULL_CONCEPT,1e-6));
 }
 
+void reverse_sentence(v_array<uint32_t>&concepts, v_array<v_array<uint32_t>>& tags, v_array<gold_head_T>&heads, uint32_t n)
+{ for (size_t i=0; i<n/2; i++)
+  {
+    size_t j = n-i-1;
+    uint32_t tmp_c = concepts[i]; concepts[i] = concepts[j]; concepts[j] = tmp_c;
+    v_array<uint32_t> tmp_t = tags[i]; tags[i] = tags[j]; tags[j] = tmp_t;
+    gold_head_T tmp_h = heads[i]; heads[i] = heads[j]; heads[j] = tmp_h;
+  }
+  for (size_t i=0; i<n; i++)
+  {
+    gold_head_T& old_h = heads[i];
+    gold_head_T new_h;
+    for (uint32_t j : old_h)
+      new_h.push_back(n-j+1);
+    heads[i] = new_h;
+    old_h.delete_v();
+  }
+}
+  
 void setup(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &gold_concepts=data->gold_concepts, &concepts=data->concepts;
@@ -725,7 +747,9 @@ void setup(Search::search& sch, vector<example*>& ec)
   gold_head_T empty_gold_head;
 
   for (size_t i=0; i<n; i++)
-    get_word_possible_concepts(*data, data->possible_concepts[i], ec[i]->tag);
+    get_word_possible_concepts(*data,
+                               data->possible_concepts[data->reverse_sentence ? n-i-1 : i],
+                               ec[i]->tag);
 
   for (auto*x = data->heads.begin(); x != data->heads.end_array; ++x) x->delete_v();
   for (auto*x = data->tags.begin(); x != data->tags.end_array; ++x) x->delete_v();
@@ -786,7 +810,8 @@ void setup(Search::search& sch, vector<example*>& ec)
   }
   for(size_t i=0; i<6; i++)
     data->children[i].resize(n+(size_t)1);
- 
+  if (data->reverse_sentence)
+    reverse_sentence(gold_concepts, gold_tags, gold_heads, n);
 }
 
 float smatch_loss(Search::search& sch, uint64_t n)
