@@ -551,14 +551,6 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
   size_t size = stack.size();
   size_t last = (size==0) ? 0 : stack.last();
 
-  /*
-  if (size >=2 && is_valid(SWAP_REDUCE_LEFT, valid_actions) && contains_gh(gold_heads[stack[size-2]], idx))
-  { gold_actions.push_back(SWAP_REDUCE_LEFT);
-    cdbg << "RET SRL" << endl;
-    return;
-  }
-  */
-  
   if (is_valid(REDUCE_LEFT,valid_actions) && contains_gh(gold_heads[last], idx))
   { gold_actions.push_back(REDUCE_LEFT);
     cdbg << "RET RL" << endl;
@@ -689,6 +681,29 @@ void get_gold_actions(Search::search &sch, uint32_t idx, uint64_t n, v_array<act
     else if (action_loss[i] == action_loss[best_action])
     { gold_actions.push_back(i);
     }
+ 
+  /*
+  if (action_loss[MAKE_CONCEPT] == action_loss[best_action])
+  { gold_actions.erase();
+    gold_actions.push_back(MAKE_CONCEPT);
+  }
+  else if (action_loss[SWAP_REDUCE_LEFT] == action_loss[best_action])
+  { gold_actions.erase();
+    gold_actions.push_back(SWAP_REDUCE_LEFT);
+  }
+  else if (action_loss[SWAP_REDUCE_RIGHT] == action_loss[best_action])
+  { gold_actions.erase();
+    gold_actions.push_back(SWAP_REDUCE_RIGHT);
+  }
+  else if (action_loss[REDUCE_LEFT] == action_loss[best_action])
+  { gold_actions.erase();
+    gold_actions.push_back(REDUCE_LEFT);
+  }
+  else if (action_loss[REDUCE_RIGHT] == action_loss[best_action])
+  { gold_actions.erase();
+    gold_actions.push_back(REDUCE_RIGHT);
+  }
+  */ 
   // return SHIFT only if no other action is better than SHIFT
   if (action_loss[SHIFT] < action_loss[best_action])
   { gold_actions.erase();
@@ -960,8 +975,8 @@ void run(Search::search& sch, vector<example*>& ec)
            .predict();
     
     if (sch.is_test() == true) //this is test time, so update action_confusion_matrix
-    { if (data->use_gold_concepts && contains(gold_actions, MAKE_CONCEPT))
-        a_id = MAKE_CONCEPT;
+    { //if (data->use_gold_concepts && contains(gold_actions, MAKE_CONCEPT))
+      //  a_id = MAKE_CONCEPT;
      
       //cerr << "GOLD ACTIONS " << gold_actions << endl;
       if (contains(gold_actions, a_id))
@@ -1012,8 +1027,8 @@ void run(Search::search& sch, vector<example*>& ec)
       t_id = sch.ldf_get_label(t_id);
       cdbg << ", label=" << t_id << endl;
 
-	  if (data->use_gold_concepts && sch.is_test())
-        t_id = gold_concepts[idx];
+	  //if (data->use_gold_concepts && sch.is_test())
+      //  t_id = gold_concepts[idx];
       /* original
       uint32_t gold_concept = gold_concepts[idx];
       t_id = P.set_tag((ptag) count)

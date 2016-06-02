@@ -27,6 +27,8 @@ def traverse_depth_first(concept_nx_graph, parent=None):
 		node_list.extend(traverse_depth_first(concept_nx_graph, parent=child)) 
 	return node_list		
 
+concept_graph_fragment_dict = {}
+
 def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 	span_concept_data = []
 	words = sentence.split()
@@ -34,6 +36,7 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 	i = 0
 	vw_idx = 1
 	concept_vw_idx_dict = {}
+	global concept_graph_fragment_dict
 	while i < len(words):
 		span_start = str(i)
 		if span_concept.has_key(span_start):
@@ -50,6 +53,8 @@ def create_span_concept_data(sentence, span_concept, pos_line, ner_line):
 			concept = "_".join(concepts)
 			if concept not in all_concepts:
 				all_concepts.append(concept)
+				if concept_nx_graph.nodes() > 1:
+					concept_graph_fragment_dict[concept] = concept_nx_graph
 			concept_short_name = "_".join(concept_short_names)
 			concept_nx_graph_root = nx.topological_sort(concept_nx_graph)[0]
 			span_concept_data.append([" ".join(span).lower(), " ".join(pos), concept, concept_short_name, " ".join(ner_line.split()[int(span_start):int(span_end)]), concept_nx_graph_root, all_concepts.index(concept)])
@@ -277,7 +282,7 @@ def print_vw_format(amr_nx_graphs, span_concept_dataset, concept_vw_idx_dict_dat
 
 def main(argv):
 	if len(argv) < 2:
-		print "usage: python amr_nx_to_vw.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <output_file.vw> <output_concepts.p> <output_relations.p> <span_concept_dict>"
+		print "usage: python amr_nx_to_vw.py <amr_nx_graphs.p> <amr_aggregated_metadata.p> <output_file.vw> <output_concepts.p> <output_relations.p> <span_concept_dict> <concept_graph_fragment_dict.p>>"
 		return
 	amr_nx_graphs_p = argv[0]
 	amr_aggregated_metadata_p = argv[1]
@@ -298,6 +303,8 @@ def main(argv):
 	all_relations.append("UNK") #for unknown relations during test time
 	pickle.dump(all_concepts, open(argv[3], 'wb'))
 	pickle.dump(all_relations, open(argv[4], 'wb'))
+	global concept_graph_fragment_dict
+	pickle.dump(concept_graph_fragment_dict, open(argv[6], 'wb'))
 	
 if __name__ == "__main__":
 	main(sys.argv[1:])

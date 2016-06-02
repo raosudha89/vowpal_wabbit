@@ -5,33 +5,52 @@ import pickle as p
 
 NULL_CONCEPT = 1
 
-def post_process(amr_nx_graph):
+def update_graph(amr_nx_graph, concept_nx_graph, nx_parent, parent, count):
+	for child in concept_nx_graph.successors(parent):
+		child_idx = 'n'+str(count)
+		count += 1
+		if "\"" in concept_nx_graph.node[child]['instance']: 
+			amr_nx_graph.add_node(child_idx, instance=concept_nx_graph.node[child]['instance'], postprocess=True)
+		else:
+			amr_nx_graph.add_node(child_idx, instance=concept_nx_graph.node[child]['instance'], postprocess=False)
+		amr_nx_graph.add_edge(nx_parent, child_idx, relation=concept_nx_graph[parent][child][0]['relation'])
+		amr_nx_graph, count = update_graph(amr_nx_graph, concept_nx_graph, child_idx, child, count)
+	return amr_nx_graph, count	
+
+def post_process(amr_nx_graph, concept_graph_fragment_dict):
 	all_nodes = amr_nx_graph.nodes()
 	count = 1
 	for node in all_nodes:
 		node_concept = amr_nx_graph.node[node]['instance']
-		parts = node_concept.split('_')	
-		if len(parts) >= 3 and parts[1] == 'name':
-			#new_reverse_map_dict[each_node] = x[0]
-			amr_nx_graph.node[node]['instance'] = parts[0]
-			name_node_idx = 'n'+str(count)
-			count += 1
-			amr_nx_graph.add_node(name_node_idx, instance='name', postprocess=False)
-			amr_nx_graph.add_edge(node, name_node_idx, relation='name')
-			subcount = 1
-			for child in parts[2:]:
-				child_idx = 'n'+str(count)
-				count += 1
-				amr_nx_graph.add_node(child_idx, instance=child, postprocess=True) 
-				amr_nx_graph.add_edge(name_node_idx, child_idx, relation='op'+str(subcount))
-				subcount += 1
-		elif len(parts) > 1:
-			amr_nx_graph.node[node]['instance'] = parts[0]
-			for part in parts[1:]:
+		if node_concept in concept_graph_fragment_dict.keys():
+			concept_nx_graph = concept_graph_fragment_dict[node_concept]
+			concept_nx_graph_root = nx.topological_sort(concept_nx_graph)[0]
+			amr_nx_graph.node[node]['instance'] = concept_nx_graph.node[concept_nx_graph_root]['instance']
+			amr_nx_graph.node[node]['postprocess'] = False
+			amr_nx_graph, count = update_graph(amr_nx_graph, concept_nx_graph, node, concept_nx_graph_root, count)	
+		else:
+			parts = node_concept.split('_')	
+			if len(parts) >= 3 and parts[1] == 'name':
+				#new_reverse_map_dict[each_node] = x[0]
+				amr_nx_graph.node[node]['instance'] = parts[0]
 				name_node_idx = 'n'+str(count)
 				count += 1
-				amr_nx_graph.add_node(name_node_idx, instance=part, postprocess=False)
-				amr_nx_graph.add_edge(node, name_node_idx, relation='op1') #TODO: get the k-best set of relation from preprocessing
+				amr_nx_graph.add_node(name_node_idx, instance='name', postprocess=False)
+				amr_nx_graph.add_edge(node, name_node_idx, relation='name')
+				subcount = 1
+				for child in parts[2:]:
+					child_idx = 'n'+str(count)
+					count += 1
+					amr_nx_graph.add_node(child_idx, instance=child, postprocess=True) 
+					amr_nx_graph.add_edge(name_node_idx, child_idx, relation='op'+str(subcount))
+					subcount += 1
+			elif len(parts) > 1:
+				amr_nx_graph.node[node]['instance'] = parts[0]
+				for part in parts[1:]:
+					name_node_idx = 'n'+str(count)
+					count += 1
+					amr_nx_graph.add_node(name_node_idx, instance=part, postprocess=False)
+					amr_nx_graph.add_edge(node, name_node_idx, relation='op1') #TODO: get the k-best set of relation from preprocessing
 		'''
 		elif len(parts) == 4 and parts[0] == 'date-entity':
 			amr_nx_graph.node[node]['instance'] = parts[0]
@@ -117,12 +136,13 @@ def print_nx_graph(nx_graph, amr_roots, output_amr_file):
 
 if __name__ == "__main__":
 	if len(sys.argv) < 2:
-		print "usage: vw_pred_to_amr.py <data.pred> <all_concepts.p> <all_relations.p> <output_amr_file>"
+		print "usage: vw_pred_to_amr.py <data.pred> <all_concepts.p> <all_relations.p> <concept_graph_fragment_dict.p> <output_amr_file>"
 		sys.exit(0)
 	vw_pred_file = open(sys.argv[1], 'r')
 	concepts_dict = p.load(open(sys.argv[2], 'rb'))
 	relations_dict = p.load(open(sys.argv[3], 'rb'))
-	output_amr_file = open(sys.argv[4], 'w')
+	concept_graph_fragment_dict = p.load(open(sys.argv[4], 'rb'))
+	output_amr_file = open(sys.argv[5], 'w')
 	all_heads = [[0]]
 	all_tags = [[0]]
 	all_concepts = [0]
@@ -133,7 +153,7 @@ if __name__ == "__main__":
 		if not values[0].isdigit() or not values[1].isdigit() or not line:
 			if all_heads:
 				amr_nx_graph, amr_roots = to_nx_graph(all_heads, all_tags, all_concepts, concepts_dict, relations_dict)
-				amr_nx_graph = post_process(amr_nx_graph)
+				amr_nx_graph = post_process(amr_nx_graph, concept_graph_fragment_dict)
 				print_nx_graph(amr_nx_graph, amr_roots, output_amr_file)
 			all_heads = [[0]]
 			all_tags = [[0]]
